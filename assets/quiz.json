@@ -1,0 +1,12 @@
+{
+  "title": "General knowledge · Demo exam",
+  "questions": [
+    {"id":"q1","prompt":"Which number is prime?","options":["21","29","39","49"],"correct_index":1},
+    {"id":"q2","prompt":"What does CPU stand for?","options":["Central Processing Unit","Computer Power Utility","Central Program Upload","Control Protocol Unit"],"correct_index":0},
+    {"id":"q3","prompt":"Which planet is known as the Red Planet?","options":["Venus","Jupiter","Mars","Mercury"],"correct_index":2},
+    {"id":"q4","prompt":"What is 15% of 200?","options":["15","20","25","30"],"correct_index":3},
+    {"id":"q5","prompt":"Which data structure follows first in, first out?","options":["Stack","Queue","Tree","Set"],"correct_index":1},
+    {"id":"q6","prompt":"Which unit measures electrical resistance?","options":["Volt","Watt","Ohm","Ampere"],"correct_index":2}
+  ]
+}
+

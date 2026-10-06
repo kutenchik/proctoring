@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+sessions/
+artifacts/
+build/
+dist/
+models/*.onnx
+models/*.task
+models/*.pt
+models/*.partial
+

@@ -10,7 +10,8 @@ from uuid import uuid4
 from proctoring.clock import Clock
 
 
-_SECRET_KEYS = {"pin", "proctor_pin", "security_pin", "pin_hash", "pin_salt", "password", "secret"}
+_SECRET_KEYS = {"pin", "proctor_pin", "security_pin", "pin_hash", "pin_salt", "password", "secret",
+                "telegram_bot_token", "webhook_token", "token", "access_token", "authorization", "api_key"}
 
 
 def _redacted(value: Any) -> Any:
@@ -37,7 +38,7 @@ class SessionStore:
     Snapshots are deliberately absent while observations are synthetic.
     """
 
-    def __init__(self, base_dir: Path, clock: Clock):
+    def __init__(self, base_dir: Path, clock: Clock, candidate: dict | None = None):
         self.path = Path(base_dir) / f"session-{uuid4().hex}"
         self.path.mkdir(parents=True, exist_ok=False)
         self._lock = threading.RLock()
@@ -45,7 +46,13 @@ class SessionStore:
         self._snapshots = None
         self._journal = (self.path / "events.jsonl").open("a", encoding="utf-8", newline="\n")
         try:
-            self._atomic_json("session.json", {"created_at": clock.wall_time(), "session_id": self.path.name})
+            metadata = {"created_at": clock.wall_time(), "session_id": self.path.name}
+            if candidate is not None:
+                metadata["candidate"] = dict(candidate)
+            self._metadata = metadata
+            self._atomic_json("session.json", metadata)
+            if candidate is not None:
+                self.append({"record_kind": "session_header", **metadata})
         except BaseException:
             self._journal.close()
             self._closed = True
@@ -80,6 +87,26 @@ class SessionStore:
             self._ensure_open()
             self._atomic_json("config.json", _redacted(config))
 
+    def update_metadata(self, values: dict) -> None:
+        with self._lock:
+            self._ensure_open()
+            self._metadata.update(values)
+            self._atomic_json("session.json", self._metadata)
+
+    def save_reference(self, jpeg_bytes: bytes, metadata: dict) -> None:
+        """The vision worker encodes; this writes only an explicitly taken selfie."""
+        if not jpeg_bytes.startswith(b"\xff\xd8"):
+            raise ValueError("Invalid baseline JPEG")
+        with self._lock:
+            self._ensure_open()
+            temporary = self.path / ".reference_face.jpg.partial"
+            try:
+                temporary.write_bytes(jpeg_bytes)
+                os.replace(temporary, self.path / "reference_face.jpg")
+            finally:
+                temporary.unlink(missing_ok=True)
+            self.update_metadata({"reference_face": "reference_face.jpg", "identity_reference": metadata})
+
     def enqueue_snapshot(self, event_id: str, frame) -> None:
         self._ensure_open()
         if self._snapshots is None:
@@ -92,6 +119,16 @@ class SessionStore:
             return {}, []
         self._snapshots.close()
         return self._snapshots.paths, self._snapshots.errors
+
+    def snapshot_results(self) -> list[dict]:
+        return self._snapshots.drain_results() if self._snapshots is not None else []
+
+    def append_remote_warning(self, record: dict) -> None:
+        """Transport diagnostics may arrive after the exam journal is finalized."""
+        serialized = _serialize(record)
+        with self._lock:
+            with (self.path / "remote_warnings.jsonl").open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(serialized + "\n")
 
     def finalize(self, summary: dict) -> None:
         with self._lock:

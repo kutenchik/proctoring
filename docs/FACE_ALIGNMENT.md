@@ -1,6 +1,8 @@
 # Face positioning before calibration — 2026-10-06
 
-The camera preview now shows a rectangular guide with corner brackets. It is amber while positioning is insufficient and green when ready. The rectangle uses exactly the same source-image coordinates as the containment check, including when the preview is resized or letterboxed. It appears before and during calibration and is removed for an exam.
+The camera preview shows a fixed portrait oval with a clear three-pixel outline. It is amber while positioning is insufficient and green when ready. The oval is centered inside the configured guide region and has a width/height ratio of 0.75, fitting inside that region even with widescreen camera input. Its position and size come from source-image coordinates mapped into the actual letterboxed image; it does not follow the detected face. It appears before and during calibration and is removed for an exam.
+
+This is a drawing-only change. The existing rectangular containment approximation, minimum sizes, eye visibility, pose, stability checks, thresholds, and sample admission remain unchanged. The oval is a face-positioning cue, not a new ellipse-containment test. Existing measurement-invalid feedback remains available; no glare detector or inferred glare diagnosis was added.
 
 Live feedback includes **Face aligned**, **Move closer**, **Center your face**, **Keep both eyes visible**, **Face the screen naturally**, and **Hold still**. The progress bar measures positioning stability, not gaze confidence or expected accuracy.
 
@@ -42,7 +44,9 @@ No gaze geometry/classifier, calibration separation threshold, event timing, pho
 
 ## Verification and manual check
 
-Full automated suite: **763 passed in 9.95 seconds** (`artifacts/alignment-tests.txt`). New coverage includes 80 alignment-model tests, 7 preview tests and 13 collection-UI tests, plus configuration validation and updated existing UI fixtures. Tests cover each rejection condition, unique capture-time stability, stale-button rejection, skipped misaligned samples, unchanged failed-fit behavior and visible letterboxed guide boundaries.
+Original positioning implementation verification: **763 passed in 9.95 seconds** (`artifacts/alignment-tests.txt`). Tests cover each rejection condition, unique capture-time stability, stale-button rejection, skipped misaligned samples, unchanged failed-fit behavior and visible letterboxed guide boundaries. The oval update extends preview checks for ellipse strokes, absence of corner brackets, fixed placement despite face movement, and both side and top/bottom letterboxing; the existing session test also checks guide visibility through calibration and removal at exam start.
+
+Oval update verification: **766 passed in 10.48 seconds** using `.\.venv\Scripts\python.exe -m pytest -q`. The native Qt layout check was rerun and both amber/green renders were inspected. Only `src/proctoring/ui/preview.py`, `tests/test_alignment_preview.py`, `tests/test_ui_stage3.py`, and this document changed for the oval update. All positioning/calibration policy and configuration files remain unchanged.
 
 The native Windows UI check uses synthetic 640×480 frames, opens no webcam and starts no exam. It verifies green/aligned enables Prepare, moving the face outside the guide disables it, gaze calibration stays unready, and protection remains INACTIVE. Numerical result: `artifacts/alignment-layout.json`; screenshots: `artifacts/alignment-ready-ui.png` and `artifacts/alignment-blocked-ui.png`. These screenshots contain no human camera images. The ordinary entry-point startup check also remains in safe mode.
 
@@ -53,5 +57,7 @@ Run the actual app with restrictions disabled:
 ```
 
 Open the camera, center the detected face inside the guide, and move closer only if requested. Face the screen naturally and wait for **Face aligned**. Move outside the guide, turn the head moderately, or cover one eye to check feedback and the disabled Prepare button; then realign before collecting the existing gaze targets. During collection, keep the face steady while moving only the eyes. Review any positioning rejection reasons alongside the existing gaze diagnostics.
+
+For the oval UI check, resize the window wide and tall: the oval should remain centered on the camera image, including when black/colored letterbox bars appear, and should keep its portrait shape. Move the face without resizing the preview: the oval should stay fixed while detection boxes may move. Check amber-to-green readiness and unchanged text, and verify it stays visible during target collection. After a successfully calibrated session starts, the oval should disappear from the exam preview. Do not bypass a failed calibration just to test that transition; automated lifecycle coverage uses synthetic measurements.
 
 **Human webcam validation is pending.** This improves sample admission and usability; it does not establish that the current camera reliably distinguishes off-screen gaze from normal quiz reading.

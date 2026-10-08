@@ -4,9 +4,11 @@ from pathlib import Path
 import sys
 import traceback
 
+from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, Qt
 from PySide6.QtWidgets import QApplication
 
 from .config import DEFAULT_CONFIG, load_config
+from .i18n import set_language
 from .controller import AppController
 from .ui.window import MainWindow
 
@@ -18,11 +20,14 @@ def main() -> int:
     parser.add_argument("--calibration-debug", action="store_true",
                         help="Show local numerical calibration diagnostics (requires safe mode)")
     args = parser.parse_args()
+    # Required before QApplication when WebEngine is imported lazily later.
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Local Proctoring")
     controller = None
     try:
         config = load_config(args.config)
+        set_language(config.ui.language)
         if args.calibration_debug:
             config = replace(config, vision=replace(config.vision, calibration_debug=True))
         if config.vision.calibration_debug and config.protection.enabled:
@@ -34,6 +39,7 @@ def main() -> int:
             controller.protection.release("startup_failure")
             controller.protection.close()
             controller.monitor.stop()
+            controller.close_remote(timeout=2.0)
         print(f"Startup failed: {error}", file=sys.stderr)
         return 2
 
@@ -55,6 +61,16 @@ def main() -> int:
             if controller.session.started and not controller.session.ended:
                 controller.end("application_exit")
         finally:
+            # QTextDocument/QPdfWriter use Qt font services in the report worker.
+            # Keep QApplication alive if Qt quit without a normal closeEvent.
+            if controller.report_status == "running":
+                completion_loop = QEventLoop()
+                report_timer = QTimer()
+                report_timer.timeout.connect(lambda: completion_loop.quit()
+                                             if controller.report_status != "running" else None)
+                report_timer.start(100)
+                completion_loop.exec()
+                report_timer.stop()
             window.shutdown_ui()
 
 

@@ -1,0 +1,112 @@
+{
+  "quiz.q1": {
+    "en": "Which number is prime?",
+    "ru": "Какое число является простым?",
+    "kk": "Қай сан жай сан?"
+  },
+  "quiz.q2": {
+    "en": "What does CPU stand for?",
+    "ru": "Как расшифровывается CPU?",
+    "kk": "CPU қысқартуы нені білдіреді?"
+  },
+  "quiz.cpu_correct": {
+    "en": "Central Processing Unit",
+    "ru": "Центральный процессор",
+    "kk": "Орталық процессор"
+  },
+  "quiz.cpu_b": {
+    "en": "Computer Power Utility",
+    "ru": "Утилита питания компьютера",
+    "kk": "Компьютер қуаты утилитасы"
+  },
+  "quiz.cpu_c": {
+    "en": "Central Program Upload",
+    "ru": "Центральная загрузка программ",
+    "kk": "Бағдарламаларды орталық жүктеу"
+  },
+  "quiz.cpu_d": {
+    "en": "Control Protocol Unit",
+    "ru": "Блок протокола управления",
+    "kk": "Басқару хаттамасының блогы"
+  },
+  "quiz.q3": {
+    "en": "Which planet is known as the Red Planet?",
+    "ru": "Какую планету называют Красной планетой?",
+    "kk": "Қай ғаламшар Қызыл ғаламшар деп аталады?"
+  },
+  "quiz.venus": {
+    "en": "Venus",
+    "ru": "Венера",
+    "kk": "Шолпан"
+  },
+  "quiz.jupiter": {
+    "en": "Jupiter",
+    "ru": "Юпитер",
+    "kk": "Юпитер"
+  },
+  "quiz.mars": {
+    "en": "Mars",
+    "ru": "Марс",
+    "kk": "Марс"
+  },
+  "quiz.mercury": {
+    "en": "Mercury",
+    "ru": "Меркурий",
+    "kk": "Меркурий"
+  },
+  "quiz.q4": {
+    "en": "What is 15% of 200?",
+    "ru": "Чему равны 15% от 200?",
+    "kk": "200 санының 15%-ы қанша?"
+  },
+  "quiz.q5": {
+    "en": "Which data structure follows first in, first out?",
+    "ru": "Какая структура данных работает по принципу «первым пришёл — первым вышел»?",
+    "kk": "Қай деректер құрылымы «бірінші кірген — бірінші шығады» қағидасымен жұмыс істейді?"
+  },
+  "quiz.stack": {
+    "en": "Stack",
+    "ru": "Стек",
+    "kk": "Стек"
+  },
+  "quiz.queue": {
+    "en": "Queue",
+    "ru": "Очередь",
+    "kk": "Кезек"
+  },
+  "quiz.tree": {
+    "en": "Tree",
+    "ru": "Дерево",
+    "kk": "Ағаш"
+  },
+  "quiz.set": {
+    "en": "Set",
+    "ru": "Множество",
+    "kk": "Жиын"
+  },
+  "quiz.q6": {
+    "en": "Which unit measures electrical resistance?",
+    "ru": "В каких единицах измеряют электрическое сопротивление?",
+    "kk": "Электр кедергісі қандай бірлікпен өлшенеді?"
+  },
+  "quiz.volt": {
+    "en": "Volt",
+    "ru": "Вольт",
+    "kk": "Вольт"
+  },
+  "quiz.watt": {
+    "en": "Watt",
+    "ru": "Ватт",
+    "kk": "Ватт"
+  },
+  "quiz.ohm": {
+    "en": "Ohm",
+    "ru": "Ом",
+    "kk": "Ом"
+  },
+  "quiz.ampere": {
+    "en": "Ampere",
+    "ru": "Ампер",
+    "kk": "Ампер"
+  }
+}

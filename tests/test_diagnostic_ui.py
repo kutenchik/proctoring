@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from dataclasses import replace
 
 import pytest
+import numpy as np
 from PySide6.QtWidgets import QApplication
 
 from proctoring.clock import FakeClock
@@ -15,7 +16,7 @@ from proctoring.vision.alignment import AlignmentConfig
 from proctoring.vision.calibration import Calibration
 from proctoring.vision.settings import VisionConfig
 from proctoring.vision.types import (
-    Box, EyeDiagnostic, FaceMeasurement, GazeDiagnostics, GazeDirection, HeadPose, VisionResult,
+    Box, EyeDiagnostic, EyeOverlay, FaceMeasurement, GazeDiagnostics, GazeDirection, HeadPose, VisionResult,
 )
 
 
@@ -43,7 +44,8 @@ def ui(qt_app):
 
 
 def measurement(stamp, features=(.5, .5, 0., 0.), *, valid=True):
-    eye = EyeDiagnostic(.5, .5, .15, valid, "" if valid else "blink_or_narrow_eye", 40. if valid else 30.)
+    eye = EyeDiagnostic(features[0], features[1], .15, valid,
+                        "" if valid else "blink_or_narrow_eye", 40. if valid else 30.)
     face = FaceMeasurement(True, box=Box(.35, .2, .65, .65),
                            features=features if valid else None, quality=1., frame_size=(640, 480),
                            head_pose=HeadPose(), diagnostics=GazeDiagnostics(eye, eye, valid,
@@ -69,7 +71,7 @@ def failed_snapshot(ui):
     stamp = 1.
     for target, row in features.items():
         for _ in range(3):
-            calibration.add_sample(target, row, stamp, 1.)
+            calibration.add_sample(target, row, stamp, 1., measurement=measurement(stamp, row).face)
             stamp += .1
     assert not calibration.fit()[0]
     widget._archive_attempt("production fit rejected")
@@ -85,6 +87,51 @@ def test_export_requires_separate_explicit_opt_in(ui, tmp_path):
     with pytest.raises(ValueError, match="Enable numerical export"):
         panel.export_to_path(tmp_path / "diagnostic.json")
     assert not list(tmp_path.iterdir())
+
+
+def test_eye_inspection_opt_in_and_collapse_clear_pixels_without_changing_calibration(ui):
+    clock, calibration, widget = ui
+    assert not widget.eye_closeups_enabled.isChecked()
+    source = np.full((480, 640, 3), 20, dtype=np.uint8)
+    overlay = EyeOverlay(((.3, .4), (.4, .4)), ((.35, .39), (.35, .41)),
+                         ((.35, .4), (.36, .4), (.35, .39), (.34, .4), (.35, .41)))
+    current = measurement(clock.monotonic(), valid=False)
+    current = replace(current, frame=source,
+                      face=replace(current.face, left_eye_overlay=overlay, right_eye_overlay=overlay))
+    widget.feed_result(current, clock.monotonic(), True)
+    assert widget.eye_closeups.left.image.image.isNull()
+    widget.eye_closeups_enabled.setChecked(True)
+    assert not widget.eye_closeups.left.image.image.isNull()
+    assert "rejected" in widget.eye_closeups.left.details.text()
+    assert not widget.collect_button.isEnabled()  # Zoom cannot authorize invalid eyes.
+    assert not calibration.ready
+    assert sum(calibration.counts.values()) == 0
+    widget.diagnostics_panel.setChecked(False)
+    assert widget.eye_closeups.left.image.image.isNull()
+    assert widget.eye_closeups.right.image.image.isNull()
+
+
+def test_eye_frames_and_overlay_geometry_are_not_in_numerical_export(ui, tmp_path):
+    _, calibration, widget = ui
+    source = np.full((480, 640, 3), 137, dtype=np.uint8)
+    overlay = EyeOverlay(((.3, .4), (.4, .4)), ((.35, .39), (.35, .41)),
+                         ((.35, .4), (.36, .4), (.35, .39), (.34, .4), (.35, .41)))
+    face = replace(measurement(10.).face, left_eye_overlay=overlay, right_eye_overlay=overlay)
+    widget.feed_result(VisionResult(10., face_present=True, face=face, frame=source), 10., True)
+    calibration.add_sample(GazeDirection.CENTER, face.features, 10., face.quality,
+                           measurement=face, frame_size=face.frame_size)
+    widget._archive_attempt("partial numerical-only attempt")
+    panel = widget.diagnostic_workflow
+    panel.export_enabled.setChecked(True)
+    path = tmp_path / "numeric.json"
+    panel.export_to_path(path)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["contains_images_or_video"] is False
+    row = saved["calibration"]["samples"]["CENTER"][0]
+    assert row["frame_size"] == [640, 480]
+    assert row["eyes"]["left"]["opening"] == .15
+    assert not any(key in path.read_text(encoding="utf-8") for key in ('"frame":', 'eye_overlay', '"iris":'))
+    assert list(tmp_path.iterdir()) == [path]
 
 
 def test_failed_attempt_can_export_no_images_and_does_not_enable_calibration(ui, tmp_path):
@@ -115,18 +162,20 @@ def test_failed_snapshot_survives_retry_and_preserves_original_rows(ui):
     assert panel.validation_button.isEnabled()
 
 
-def test_insufficient_invalid_target_is_retained_before_discard(ui):
+def test_insufficient_invalid_target_is_retained_until_local_retry(ui):
     _, calibration, widget = ui
     widget.begin_collection()
     tick(ui, 12.1, measurement(12.1))
     tick(ui, 12.2, measurement(12.2, valid=False))
-    tick(ui, 15., measurement(12.2, valid=False))
-    assert calibration.counts[GazeDirection.CENTER] == 0
+    for stamp in (13., 14., 15., 16., 17., 18.):
+        tick(ui, stamp, measurement(stamp, valid=False))
+    assert calibration.counts[GazeDirection.CENTER] == 1
     snapshot = widget.diagnostic_workflow.selected_attempt["calibration"]
     assert snapshot["diagnostics"]["targets"]["CENTER"]["accepted"] == 1
-    assert snapshot["diagnostics"]["targets"]["CENTER"]["rejection_reasons"]["blink_or_narrow_eye"] == 1
+    assert snapshot["diagnostics"]["targets"]["CENTER"]["rejection_reasons"]["blink_or_narrow_eye"] == 6
     assert snapshot["samples"]["CENTER"][1]["eyes"]["left"]["width_pixels"] == 30.
-    assert "blink_or_narrow_eye: 1" in widget.status.text()
+    assert "Eye measurements temporarily unavailable" in widget.status.text()
+    assert "blink_or_narrow_eye" not in widget.status.text()
 
 
 def test_fresh_validation_stays_separate_and_records_unknown_invalid_measurements(ui):
@@ -293,3 +342,100 @@ def test_frame_size_comes_from_actual_source_not_requested_resolution():
     result = VisionResult(1., frame=Frame())
     assert frame_size(result) == (640, 480)
     assert frame_size(VisionResult(1.)) is None
+
+
+def test_retry_identifies_new_empty_baseline_and_retained_old_references(ui, tmp_path):
+    _, calibration, widget = ui
+    failed_snapshot(ui)
+    panel = widget.diagnostic_workflow
+    identity = panel.selected_attempt["attempt_identity"].copy()
+    widget.reset()
+    assert panel.current_baseline["baseline_id"] != identity["baseline_id"]
+    assert sum(panel.current_baseline["accepted_samples"].values()) == 0
+    assert sum(calibration.counts.values()) == 0
+    assert "Previous baseline selected" in panel.attempt_identity.text()
+    assert "No validation collected" in panel.attempt_identity.text()
+    panel.begin_validation()
+    assert "Validation source: attempt 1" in panel.attempt_identity.text()
+    panel.cancel_validation()
+    panel.export_enabled.setChecked(True)
+    path = tmp_path / "retained-after-retry.json"
+    panel.export_to_path(path)
+    exported = json.loads(path.read_text("utf-8"))
+    assert exported["attempt_identity"] == identity
+    assert exported["validation"]["source_attempt_identity"] == identity
+    assert exported["current_collection_at_export"]["baseline_id"] != identity["baseline_id"]
+
+
+def test_retry_fresh_samples_get_a_distinct_selected_attempt(ui, tmp_path):
+    clock, calibration, widget = ui
+    failed_snapshot(ui)
+    panel = widget.diagnostic_workflow
+    old = panel.selected_attempt
+    widget.reset()
+    fresh_baseline = panel.current_baseline["baseline_id"]
+    for stamp in (10.1, 10.2, 10.3):
+        tick(ui, stamp, measurement(stamp))
+    for features in ((.5, .5, 0, 0), (.2, .5, 0, 0), (.8, .5, 0, 0), (.5, .8, 0, 0)):
+        widget.begin_collection()
+        start = clock.monotonic() + 2
+        for offset in (.1, .3, .5):
+            tick(ui, start + offset, measurement(start + offset, features))
+        assert panel.current_baseline["accepted_samples"][widget.direction.value] == 3
+        tick(ui, start + 3, measurement(start + 2.9, features))
+    fresh = panel.selected_attempt
+    assert fresh is not old
+    assert fresh["attempt_identity"]["baseline_id"] == fresh_baseline
+    assert fresh["attempt_identity"]["attempt_id"] != old["attempt_identity"]["attempt_id"]
+    assert fresh["attempt_identity"]["calibration_sha256"] != old["attempt_identity"]["calibration_sha256"]
+    assert fresh["calibration"]["last_accepted_timestamp"] > old["calibration"]["last_recorded_timestamp"]
+    assert all(row["timestamp"] > 10 for rows in fresh["calibration"]["samples"].values() for row in rows)
+    assert fresh["validation"] is None
+    assert "Previous baseline selected" not in panel.attempt_identity.text()
+    assert calibration.ready
+
+
+def test_reselecting_current_snapshot_does_not_leave_an_older_attempt_selected(ui):
+    _, _, widget = ui
+    panel = widget.diagnostic_workflow
+    panel.remember({"last_accepted_timestamp": 1}, "old")
+    panel.remember({"last_accepted_timestamp": 2}, "current")
+    panel.attempt_selector.setCurrentIndex(0)
+    panel.remember({"last_accepted_timestamp": 2}, "retained before retry")
+    assert len(panel.attempts) == 2
+    assert panel.selected_attempt["calibration"]["last_accepted_timestamp"] == 2
+
+
+def test_validation_report_cannot_be_attached_to_a_different_selected_attempt(ui, tmp_path):
+    _, _, widget = ui
+    failed_snapshot(ui)
+    panel = widget.diagnostic_workflow
+    source = panel.selected_attempt
+    panel.remember({"last_accepted_timestamp": 3}, "other")
+    other = panel.selected_attempt
+    panel.attempt_selector.setCurrentIndex(0)
+    panel.begin_validation()
+    panel.prepare_target()
+    tick(ui, 12.1, measurement(12.1))
+    assert not panel.attempt_selector.isEnabled()
+    # Guard also against a programmatic selection change despite disabled UI.
+    panel.attempt_selector.setCurrentIndex(1)
+    panel.export_enabled.setChecked(True)
+    path = tmp_path / "other.json"
+    panel.export_to_path(path)
+    assert other["validation"] is None
+    assert source["validation"]["source_attempt_identity"] == source["attempt_identity"]
+    assert json.loads(path.read_text("utf-8"))["validation"] is None
+    panel.cancel_validation()
+
+
+def test_candidate_requires_explicit_enablement_and_stays_outside_production(ui):
+    _, calibration, widget = ui
+    failed_snapshot(ui)
+    panel = widget.diagnostic_workflow
+    assert not panel.candidate_enabled.isChecked()
+    panel.candidate_enabled.setChecked(True)
+    panel.begin_validation()
+    assert not panel.candidate_enabled.isEnabled()
+    assert panel.validation.targets[-4:] == ("BLINK", "BRIEF_CLOSURE", "SUSTAINED_CLOSURE", "SQUINT")
+    assert not calibration.ready

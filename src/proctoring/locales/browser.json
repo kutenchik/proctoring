@@ -1,0 +1,227 @@
+{
+  "browser.deferred": {
+    "en": "Exam page will load when the session starts.",
+    "ru": "Страница экзамена загрузится после начала сеанса.",
+    "kk": "Емтихан беті сеанс басталғанда жүктеледі."
+  },
+  "browser.reload": {
+    "en": "Reload",
+    "ru": "Обновить",
+    "kk": "Қайта жүктеу"
+  },
+  "browser.reload_page": {
+    "en": "Reload page",
+    "ru": "Обновить страницу",
+    "kk": "Бетті қайта жүктеу"
+  },
+  "browser.unavailable": {
+    "en": "Embedded browser unavailable. Install the project's browser extra (python -m pip install -e \".[browser]\") in this virtual environment. {error}",
+    "ru": "Встроенный браузер недоступен. Установите дополнение browser проекта (python -m pip install -e \".[browser]\") в это виртуальное окружение. {error}",
+    "kk": "Ендірілген браузер қолжетімсіз. Осы виртуалды ортаға жобаның browser қосымшасын орнатыңыз (python -m pip install -e \".[browser]\"). {error}"
+  },
+  "browser.loading": {
+    "en": "Loading exam page…",
+    "ru": "Загрузка страницы экзамена…",
+    "kk": "Емтихан беті жүктелуде…"
+  },
+  "browser.loaded": {
+    "en": "Exam page loaded.",
+    "ru": "Страница экзамена загружена.",
+    "kk": "Емтихан беті жүктелді."
+  },
+  "browser.load_failed": {
+    "en": "Exam page could not load. Check the network connection, then select Reload.",
+    "ru": "Не удалось загрузить страницу экзамена. Проверьте соединение с сетью и нажмите «Обновить».",
+    "kk": "Емтихан беті жүктелмеді. Желі қосылымын тексеріп, «Қайта жүктеу» түймесін басыңыз."
+  },
+  "browser.timeout": {
+    "en": "Exam page loading timed out. Check the network connection, then select Reload.",
+    "ru": "Время загрузки страницы истекло. Проверьте соединение с сетью и нажмите «Обновить».",
+    "kk": "Бетті жүктеу уақыты аяқталды. Желі қосылымын тексеріп, «Қайта жүктеу» түймесін басыңыз."
+  },
+  "browser.outside": {
+    "en": "Navigation outside exam domain is blocked",
+    "ru": "Переход за пределы домена экзамена заблокирован",
+    "kk": "Емтихан доменінен тыс өту бұғатталған"
+  },
+  "browser.popups": {
+    "en": "Opening additional browser windows is blocked",
+    "ru": "Открытие дополнительных окон браузера заблокировано",
+    "kk": "Қосымша браузер терезелерін ашу бұғатталған"
+  },
+  "browser.downloads": {
+    "en": "Downloading files from the exam browser is blocked",
+    "ru": "Скачивание файлов из браузера экзамена заблокировано",
+    "kk": "Емтихан браузерінен файл жүктеп алу бұғатталған"
+  },
+  "browser.renderer": {
+    "en": "Exam page stopped unexpectedly. Select Reload to try again.",
+    "ru": "Страница экзамена неожиданно остановилась. Нажмите «Обновить» для повторной попытки.",
+    "kk": "Емтихан беті күтпеген жерден тоқтады. Қайталау үшін «Қайта жүктеу» түймесін басыңыз."
+  },
+  "browser.ended": {
+    "en": "Exam browser session ended.",
+    "ru": "Сеанс браузера экзамена завершён.",
+    "kk": "Емтихан браузерінің сеансы аяқталды."
+  },
+  "browser.already_ended": {
+    "en": "This browser session has already ended.",
+    "ru": "Этот сеанс браузера уже завершён.",
+    "kk": "Бұл браузер сеансы аяқталған."
+  },
+  "browser.monitor_stopped": {
+    "en": "Monitoring stopped",
+    "ru": "Наблюдение остановлено",
+    "kk": "Бақылау тоқтатылды"
+  },
+  "browser.monitor_unstarted": {
+    "en": "Monitoring has not started",
+    "ru": "Наблюдение ещё не начато",
+    "kk": "Бақылау әлі басталмаған"
+  },
+  "browser.monitor_clock": {
+    "en": "Invalid monitoring clock",
+    "ru": "Неверное время наблюдения",
+    "kk": "Бақылау уақыты жарамсыз"
+  },
+  "browser.camera_frames": {
+    "en": "Camera frames",
+    "ru": "Кадры камеры",
+    "kk": "Камера кадрлары"
+  },
+  "browser.camera_frames_lower": {
+    "en": "camera frames",
+    "ru": "кадров камеры",
+    "kk": "камера кадрлары"
+  },
+  "browser.worker_heartbeat": {
+    "en": "Vision worker heartbeat",
+    "ru": "Сигнал работоспособности обработки видео",
+    "kk": "Бейне өңдеу жұмысының сигналы"
+  },
+  "browser.worker_heartbeat_lower": {
+    "en": "vision worker heartbeat",
+    "ru": "сигнала работоспособности обработки видео",
+    "kk": "бейне өңдеу жұмысының сигналы"
+  },
+  "browser.vision_results": {
+    "en": "Vision results",
+    "ru": "Результаты обработки видео",
+    "kk": "Бейне өңдеу нәтижелері"
+  },
+  "browser.vision_results_lower": {
+    "en": "vision results",
+    "ru": "результатов обработки видео",
+    "kk": "бейне өңдеу нәтижелері"
+  },
+  "browser.waiting": {
+    "en": "Waiting for {item}",
+    "ru": "Ожидание: {item}",
+    "kk": "Күтілуде: {item}"
+  },
+  "browser.timestamp": {
+    "en": "Invalid {item} timestamp",
+    "ru": "Некорректная метка времени: {item}",
+    "kk": "Уақыт белгісі жарамсыз: {item}"
+  },
+  "browser.stale": {
+    "en": "{item} stale",
+    "ru": "Данные устарели: {item}",
+    "kk": "Деректер ескірген: {item}"
+  },
+  "browser.initializing": {
+    "en": "Initializing local vision models",
+    "ru": "Инициализация локальных моделей компьютерного зрения",
+    "kk": "Жергілікті компьютерлік көру модельдері іске қосылуда"
+  },
+  "browser.inference_failure": {
+    "en": "Vision inference failed: {error}",
+    "ru": "Ошибка обработки видео: {error}",
+    "kk": "Бейне өңдеу қатесі: {error}"
+  },
+  "browser.worker_stopping": {
+    "en": "Vision worker is still shutting down; wait before retrying",
+    "ru": "Обработка видео ещё завершается; подождите перед повтором",
+    "kk": "Бейне өңдеу әлі тоқтап жатыр; қайталамас бұрын күтіңіз"
+  },
+  "browser.driver_stopping": {
+    "en": "Webcam driver is still shutting down; retry after it releases the camera",
+    "ru": "Драйвер камеры ещё завершает работу; повторите после освобождения камеры",
+    "kk": "Камера драйвері әлі тоқтап жатыр; камера босатылғаннан кейін қайталаңыз"
+  },
+  "browser.disconnected": {
+    "en": "Camera disconnected",
+    "ru": "Камера отключена",
+    "kk": "Камера ажыратылған"
+  },
+  "browser.camera_failure": {
+    "en": "Camera read failed (disconnected or unavailable)",
+    "ru": "Ошибка чтения камеры (отключена или недоступна)",
+    "kk": "Камераны оқу қатесі (ажыратылған немесе қолжетімсіз)"
+  },
+  "browser.cannot_open": {
+    "en": "Could not open camera index {index}",
+    "ru": "Не удалось открыть камеру с индексом {index}",
+    "kk": "Индексі {index} камера ашылмады"
+  },
+  "browser.need_monitor": {
+    "en": "Monitoring must be healthy before starting an exam",
+    "ru": "Перед началом экзамена наблюдение должно работать",
+    "kk": "Емтихан басталғанша бақылау жұмыс істеуі тиіс"
+  },
+  "browser.calibration_required": {
+    "en": "Complete gaze calibration before starting an exam",
+    "ru": "Завершите калибровку взгляда перед началом экзамена",
+    "kk": "Емтихан басталғанша көзқарасты калибрлеуді аяқтаңыз"
+  },
+  "browser.security_recovery": {
+    "en": "Protection released through independent recovery",
+    "ru": "Защита снята независимым механизмом восстановления",
+    "kk": "Қорғаныс тәуелсіз қалпына келтіру арқылы алынды"
+  },
+  "browser.emergency_release": {
+    "en": "Emergency recovery released Windows protection.",
+    "ru": "Аварийное восстановление сняло защиту Windows.",
+    "kk": "Төтенше қалпына келтіру Windows қорғанысын алып тастады."
+  },
+  "browser.auto_release": {
+    "en": "Windows protection released automatically: {reason}",
+    "ru": "Защита Windows снята автоматически: {reason}",
+    "kk": "Windows қорғанысы автоматты алынды: {reason}"
+  },
+  "browser.foreign_window": {
+    "en": "Attempted to activate a window outside the exam application.",
+    "ru": "Попытка активировать окно вне приложения экзамена.",
+    "kk": "Емтихан қолданбасынан тыс терезені белсендіру әрекеті."
+  },
+  "browser.shortcut_audit": {
+    "en": "Observed shortcut in audit mode: {shortcut}",
+    "ru": "Комбинация в режиме аудита: {shortcut}",
+    "kk": "Аудит режимінде байқалған пернелер тіркесімі: {shortcut}"
+  },
+  "browser.shortcut_blocked": {
+    "en": "Blocked shortcut: {shortcut}",
+    "ru": "Заблокирована комбинация: {shortcut}",
+    "kk": "Бұғатталған пернелер тіркесімі: {shortcut}"
+  },
+  "browser.leave_fullscreen": {
+    "en": "Attempt to leave the fullscreen exam window",
+    "ru": "Попытка выйти из полноэкранного окна экзамена",
+    "kk": "Емтиханның толық экран терезесінен шығу әрекеті"
+  },
+  "browser.window_close": {
+    "en": "Exam window close requested",
+    "ru": "Запрошено закрытие окна экзамена",
+    "kk": "Емтихан терезесін жабу сұралды"
+  },
+  "browser.protected_action": {
+    "en": "Protected environment action",
+    "ru": "Действие в защищённой среде",
+    "kk": "Қорғалған ортадағы әрекет"
+  },
+  "browser.protection_recovery": {
+    "en": "Protection released for recovery",
+    "ru": "Защита снята для восстановления",
+    "kk": "Қалпына келтіру үшін қорғаныс алынды"
+  }
+}

@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 
 from proctoring.clock import Clock
+from proctoring.registration import CandidateInfo
 
 
 class SessionController:
@@ -30,6 +31,17 @@ class SessionController:
         self._pause_reasons: set[str] = set()
         self._monitoring_healthy = True
         self._failure_since: float | None = None
+        self._candidate: CandidateInfo | None = None
+
+    @property
+    def candidate(self) -> CandidateInfo | None:
+        return self._candidate
+
+    def set_candidate(self, candidate: CandidateInfo | dict, *, require_group: bool = True) -> None:
+        if self.started or self.ended:
+            raise RuntimeError("Candidate identity cannot change after the session starts")
+        values = candidate.as_dict() if isinstance(candidate, CandidateInfo) else candidate
+        self._candidate = CandidateInfo.from_dict(values, require_group=require_group)
 
     @property
     def pause_reasons(self) -> set[str]:

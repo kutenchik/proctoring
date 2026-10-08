@@ -1,0 +1,6 @@
+# Verified Windows Python 3.11 remote-dispatch dependencies (official PyPI).
+requests==2.34.2
+certifi==2026.7.22
+charset-normalizer==3.5.2
+idna==3.20
+urllib3==2.8.0

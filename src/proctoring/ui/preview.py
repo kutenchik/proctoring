@@ -5,6 +5,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from ..i18n import manager, translate_text
+
 
 class CameraPreview(QWidget):
     def __init__(self, parent=None):
@@ -17,12 +19,14 @@ class CameraPreview(QWidget):
         self._healthy = False
         self._message = "Open the camera to begin"
         self._alignment = None
+        manager.language_changed.connect(self.update)
 
     def set_alignment(self, status=None) -> None:
         """Show calibration alignment without changing camera data or detections.
 
-        The guide describes detected face bounds in normalized *source-frame*
-        coordinates. Passing None removes it (for example, during the exam).
+        Fixed normalized *source-frame* bounds position the visual oval; the
+        readiness policy keeps its existing rectangular containment check.
+        Passing None removes the guide (for example, during the exam).
         """
         self._alignment = status
         self.update()
@@ -40,6 +44,21 @@ class CameraPreview(QWidget):
         x1, y1, x2, y2 = bounds
         return QRectF(area.x() + x1 * area.width(), area.y() + y1 * area.height(),
                       (x2 - x1) * area.width(), (y2 - y1) * area.height())
+
+    @classmethod
+    def _alignment_oval_rect(cls, area: QRectF, bounds) -> QRectF:
+        """A fixed portrait oval, independent of the detected face's bounds.
+
+        Fit inside the configured guide region so widescreen camera frames do
+        not turn the face guide sideways. Coordinates use the same image target
+        as camera painting, including its letterbox offset and resize scale.
+        This affects drawing only, never sample admission or readiness.
+        """
+        region = cls._normalized_rect(area, bounds)
+        height = min(region.height(), region.width() / .75)
+        oval = QRectF(0, 0, height * .75, height)
+        oval.moveCenter(region.center())
+        return oval
 
     @staticmethod
     def _alignment_feedback_rect(area: QRectF, guide: QRectF) -> QRectF:
@@ -76,7 +95,7 @@ class CameraPreview(QWidget):
             painter.setPen(QColor("#d2e6ec"))
             painter.drawText(self.rect().adjusted(20, 20, -20, -20),
                              Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                             self._message or "Waiting for camera frames")
+                             translate_text(self._message or "Waiting for camera frames"))
             return
         target = self._image_target()
         painter.drawImage(target, self._image)
@@ -93,7 +112,7 @@ class CameraPreview(QWidget):
             painter.setPen(QColor("#ffffff"))
             painter.drawText(target.adjusted(16, 16, -16, -16),
                              Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                             self._message or "Monitoring unavailable")
+                             translate_text(self._message or "Monitoring unavailable"))
         if self._alignment is not None:
             self._draw_alignment(painter, target)
 
@@ -101,20 +120,12 @@ class CameraPreview(QWidget):
         # A stale ready status must never remain green over an unhealthy feed.
         ready = self._healthy and self._alignment.ready
         color = QColor("#4de0b1" if ready else "#ffd166")
-        rect = self._normalized_rect(area, self._alignment.guide)
+        rect = self._alignment_oval_rect(area, self._alignment.guide)
         painter.save()
         painter.setClipRect(area)
-        painter.setPen(QPen(color, 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(rect)
         painter.setPen(QPen(color, 3))
-        length = min(22.0, rect.width() * .12, rect.height() * .12)
-        for x, y, dx, dy in ((rect.left(), rect.top(), 1, 1),
-                              (rect.right(), rect.top(), -1, 1),
-                              (rect.left(), rect.bottom(), 1, -1),
-                              (rect.right(), rect.bottom(), -1, -1)):
-            painter.drawLine(QPointF(x, y), QPointF(x + dx * length, y))
-            painter.drawLine(QPointF(x, y), QPointF(x, y + dy * length))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(rect)
 
         message = (self._alignment.message if self._healthy else
                    self._message or "Waiting for fresh camera frames")
@@ -124,7 +135,7 @@ class CameraPreview(QWidget):
         if not bar.isNull():
             painter.fillRect(bar, QColor(10, 20, 30, 210))
             painter.setPen(color)
-            text = painter.fontMetrics().elidedText(message, Qt.TextElideMode.ElideRight,
+            text = painter.fontMetrics().elidedText(translate_text(message), Qt.TextElideMode.ElideRight,
                                                    max(1, int(bar.width() - 12)))
             painter.drawText(bar.adjusted(6, 0, -6, -3), Qt.AlignmentFlag.AlignVCenter, text)
             progress = max(0.0, min(1.0, self._alignment.progress)) if self._healthy else 0.0
@@ -139,4 +150,4 @@ class CameraPreview(QWidget):
         painter.drawRect(rect)
         if text:
             painter.drawText(QPointF(rect.x() + 4, max(area.y() + 15, rect.y() - 5)),
-                             f"{text} {box.confidence:.0%}")
+                             f"{translate_text(text)} {box.confidence:.0%}")

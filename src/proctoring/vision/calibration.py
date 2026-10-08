@@ -13,6 +13,7 @@ from statistics import median
 from threading import RLock
 
 from .settings import VisionConfig
+from .classifier import aperture_guard, derive_aperture_references
 from .types import FaceMeasurement, GazeDirection
 
 
@@ -122,6 +123,7 @@ class Calibration:
             self._last_recorded_timestamp = -math.inf
             self._fit_message = "Calibration has not been fitted."
             self._failed_targets: tuple[GazeDirection, ...] = ()
+            self._aperture_references = None
 
     @property
     def ready(self) -> bool:
@@ -190,6 +192,7 @@ class Calibration:
             self._rejections[direction].clear()
             self._centers.clear()
             self._radii.clear()
+            self._aperture_references = None
             self._failed_targets = ()
             self._fit_message = f"Collect fresh {direction.value} samples."
 
@@ -333,27 +336,30 @@ class Calibration:
                 first, second = targets[direction], targets[other]
                 if first["eye_median"] is None or second["eye_median"] is None:
                     continue
-                eye_separation = _distance(first["eye_median"], second["eye_median"])
+                radial_separation = _distance(first["eye_median"], second["eye_median"])
+                vertical_gate = direction == GazeDirection.CENTER and other == GazeDirection.DOWN
+                eye_separation = (abs(second["eye_median"][1] - first["eye_median"][1])
+                                  if vertical_gate else radial_separation)
                 noise = max(first["measurement_noise_floor"], second["measurement_noise_floor"])
-                required = max(
-                    self.config.calibration_min_signal_noise * noise,
-                    2.5 * max(first["eye_spread_p90"], second["eye_spread_p90"]),
-                )
                 constant = self.config.calibration_min_signal_noise * self.config.calibration_eye_noise_floor
                 supplied = [value for value in (first["supplied_pixel_noise_floor_p90"],
                                                  second["supplied_pixel_noise_floor_p90"])
                             if value is not None]
-                pixel = self.config.calibration_min_signal_noise * max(supplied) if supplied else None
-                spread = 2.5 * max(first["eye_spread_p90"], second["eye_spread_p90"])
+                pixel = self.config.calibration_pixel_uncertainty_multiplier * max(supplied) if supplied else None
+                spread = (2.0 * max(first["eye_axes"]["vertical"]["spread_p90"],
+                                    second["eye_axes"]["vertical"]["spread_p90"])
+                          if vertical_gate else 2.5 * max(first["eye_spread_p90"], second["eye_spread_p90"]))
                 contributions = {"constant_noise_floor": constant, "pixel_noise_floor": pixel,
                                  "spread": spread}
+                required = max(value for value in contributions.values() if value is not None)
                 dominant = [name for name, value in contributions.items()
                             if value is not None and math.isclose(value, required, rel_tol=1e-9, abs_tol=1e-12)]
                 axes = {}
                 for axis_index, axis in enumerate(("horizontal", "vertical")):
                     difference = second["eye_median"][axis_index] - first["eye_median"][axis_index]
-                    axis_spread = 2.5 * max(first["eye_axes"][axis]["spread_p90"],
-                                          second["eye_axes"][axis]["spread_p90"])
+                    axis_spread_multiplier = 2.0 if vertical_gate and axis == "vertical" else 2.5
+                    axis_spread = axis_spread_multiplier * max(first["eye_axes"][axis]["spread_p90"],
+                                                               second["eye_axes"][axis]["spread_p90"])
                     axis_contributions = dict(contributions, spread=axis_spread)
                     axis_required = max(value for value in axis_contributions.values() if value is not None)
                     eyes = {}
@@ -369,6 +375,8 @@ class Calibration:
                     a, b = first["eye_axes"][axis], second["eye_axes"][axis]
                     axes[axis] = {
                         "metric_dimensions": 1, "signed_second_minus_first": difference,
+                        "used_for_fit": vertical_gate and axis == "vertical",
+                        "spread_multiplier": axis_spread_multiplier,
                         "separation": abs(difference), "threshold_contributions": axis_contributions,
                         "required_separation": axis_required,
                         "dominant_contributions": [name for name, value in axis_contributions.items()
@@ -382,20 +390,24 @@ class Calibration:
                 relevant_axis = ("vertical" if other == GazeDirection.DOWN else "horizontal") if direction == GazeDirection.CENTER else None
                 pairs[f"{direction.value}_{other.value}"] = {
                     "eye_separation": eye_separation,
+                    "radial_eye_separation": radial_separation,
                     "required_eye_separation": required,
                     "eye_signal_noise": eye_separation / noise,
                     "required_signal_noise": required / noise,
                     "head_separation_degrees": _distance(
                         first["head_median_degrees"], second["head_median_degrees"]),
                     "passed": eye_separation >= required,
-                    "metric_dimensions": 2,
-                    "metric": "Euclidean distance of two-eye mean (horizontal, vertical)",
+                    "metric_dimensions": 1 if vertical_gate else 2,
+                    "metric": ("Absolute vertical displacement of two-eye mean" if vertical_gate else
+                               "Euclidean distance of two-eye mean (horizontal, vertical)"),
                     "units": "normalized eye-corner widths",
                     "threshold_contributions": contributions,
                     "dominant_contributions": dominant,
+                    "pixel_uncertainty_multiplier": self.config.calibration_pixel_uncertainty_multiplier,
+                    "spread_multiplier": 2.0 if vertical_gate else 2.5,
                     "axes": axes,
                     "relevant_axis": relevant_axis,
-                    "axis_comparisons_are_diagnostic_only": True,
+                    "axis_comparisons_are_diagnostic_only": not vertical_gate,
                     "unrelated_axis_spread_larger": (
                         max(first["eye_axes"]["horizontal" if relevant_axis == "vertical" else "vertical"]["spread_p90"],
                             second["eye_axes"]["horizontal" if relevant_axis == "vertical" else "vertical"]["spread_p90"])
@@ -417,13 +429,14 @@ class Calibration:
                     "spread_p90": "90th percentile absolute deviation from the coordinate median",
                     "eye_spread_p90": "90th percentile 2D Euclidean distance from coordinate medians",
                     "interval_overlap": "Empirical p10-to-p90 intervals, not confidence intervals or proof of generalizable separation",
-                    "pixel_floor": "UI-supplied 1 / min(original-frame left eye width, right eye width); assumed scalar radial safeguard in the 2D two-eye-mean feature space, not measured landmark accuracy or a per-axis standard deviation",
-                    "production_gate": "max(SNR * constant floor, SNR * supplied pixel floor p90, 2.5 * radial spread p90), all in normalized eye-width units",
-                    "axis_comparisons": "One-dimensional diagnostic comparisons reuse the existing scalar radial safeguard, not a measured per-axis uncertainty; they do not change the two-dimensional production gate",
+                    "pixel_floor": "UI-supplied 1 / min(original-frame left eye width, right eye width); multiplied by calibration_pixel_uncertainty_multiplier as an assumed resolution safeguard, not measured landmark accuracy or a standard deviation",
+                    "production_gate": "CENTER_DOWN: absolute vertical separation >= max(SNR * constant floor, pixel multiplier * supplied pixel floor p90, 2 * vertical spread p90). Other pairs: radial separation >= max(SNR * constant floor, pixel multiplier * supplied pixel floor p90, 2.5 * radial spread p90). All terms are normalized eye-width lengths, not variances.",
+                    "axis_comparisons": "CENTER_DOWN vertical comparison is its production fit gate; remaining axis comparisons are diagnostic only. The same scalar pixel-resolution assumption is used for each, not measured per-axis uncertainty.",
                     "eyes": "Per-eye medians/spreads use retained accepted samples; all_recorded_eyes additionally includes rejected measurements",
                     "radial_tail_axis_energy_fraction": "Fraction of squared horizontal/vertical deviations among samples at or above radial p90; reveals which axis contributes to the radial tail",
                 },
-                "classification": "eye point cores with bounded CENTER-to-DOWN horizontal extension; head pose only rejects unsupported poses",
+                "classification": "eye point cores plus guarded session-aperture DOWN supplement; closures/invalid eyes remain UNKNOWN; head pose only rejects unsupported poses",
+                "aperture_references_available": self._aperture_references is not None,
                 "targets": {direction.value: stats for direction, stats in targets.items()},
                 "pairs": self._pair_statistics(targets),
                 "failed_targets": [direction.value for direction in self._failed_targets],
@@ -439,6 +452,13 @@ class Calibration:
         with self._lock:
             return deepcopy({
                 "schema_version": 1,
+                "classifier_policy": {
+                    "version": "guarded_aperture_down_v1",
+                    "required_samples": self.config.calibration_samples,
+                    "pixel_uncertainty_multiplier": self.config.calibration_pixel_uncertainty_multiplier,
+                    "center_radius_fraction": self.config.calibration_center_radius_fraction,
+                    "offscreen_radius_fraction": self.config.calibration_offscreen_radius_fraction,
+                },
                 "purpose": "DEBUG / UNVALIDATED — numerical calibration diagnostics",
                 "diagnostics": self.diagnostics,
                 "last_accepted_timestamp": _finite(self._last_timestamp),
@@ -458,6 +478,7 @@ class Calibration:
         with self._lock:
             self._centers.clear()
             self._radii.clear()
+            self._aperture_references = None
             self._failed_targets = ()
             missing = [direction for direction in DIRECTIONS
                        if len(self._samples[direction]) < self.config.calibration_samples]
@@ -490,8 +511,9 @@ class Calibration:
                     else:
                         cause = "The configured constant noise-floor gate dominates"
                     axis_name = pair["relevant_axis"]
+                    axis_kind = "fit" if not pair["axis_comparisons_are_diagnostic_only"] else "diagnostic"
                     axis_detail = (f" {axis_name.title()} separation "
-                                   f"{pair['axes'][axis_name]['separation']:.4f}; diagnostic axis requirement "
+                                   f"{pair['axes'][axis_name]['separation']:.4f}; {axis_kind} axis requirement "
                                    f"{pair['axes'][axis_name]['required_separation']:.4f}." if axis_name else "")
                     return self._failure(
                         f"{first.value} and {second.value} eye measurements were not distinct enough "
@@ -518,28 +540,52 @@ class Calibration:
                     self.config.calibration_offscreen_radius_fraction * distance,
                     .4 * nearest,
                 )
+            self._aperture_references = derive_aperture_references(
+                self._records, required_samples=self.config.calibration_samples)
             self._fit_message = (
                 "Calibration complete. Eye directions use this session's iris references; "
                 "ambiguous measurements remain UNKNOWN. Head pose is shown separately.")
             return True, self._fit_message
 
-    def classify(self, features: tuple[float, ...] | None) -> tuple[GazeDirection, float | None]:
-        if features is None or len(features) != 4 or not all(math.isfinite(x) for x in features):
-            return GazeDirection.UNKNOWN, None
+    def classify(self, features: tuple[float, ...] | None, *,
+                 measurement: FaceMeasurement | None = None) -> tuple[GazeDirection, float | None]:
+        """Live callers supply the current face, including eye validity/aperture.
+
+        Features-only calls retain the iris-only comparison API for existing
+        numerical tests/tools; the camera observation path always supplies the
+        matching FaceMeasurement and cannot bypass closure checks.
+        """
+        direction, similarity, _ = self.classify_details(features, measurement=measurement)
+        return direction, similarity
+
+    def classify_details(self, features: tuple[float, ...] | None, *,
+                         measurement: FaceMeasurement | None = None) -> tuple[GazeDirection, float | None, str]:
         with self._lock:
             if not self.ready:
-                return GazeDirection.UNKNOWN, None
+                return GazeDirection.UNKNOWN, None, "calibration_not_ready"
+            if features is None or len(features) != 4 or not all(math.isfinite(x) for x in features):
+                if measurement is not None:
+                    guarded = aperture_guard(features, self._centers, self._radii,
+                                             self._aperture_references, measurement)
+                    if guarded is not None:
+                        return guarded
+                return GazeDirection.UNKNOWN, None, "missing_or_invalid_features"
             # Looking around with the head can invalidate the eye geometry. A
             # head cue only vetoes extrapolation, never supplies a direction.
             for axis in (2, 3):
                 calibrated = [reference[axis] for reference in self._centers.values()]
                 allowance = 10.0 / 60.0
                 if not min(calibrated) - allowance <= features[axis] <= max(calibrated) + allowance:
-                    return GazeDirection.UNKNOWN, None
+                    return GazeDirection.UNKNOWN, None, "head_pose_outside_reference_coverage"
+            if measurement is not None:
+                guarded = aperture_guard(features, self._centers, self._radii,
+                                         self._aperture_references, measurement)
+                if guarded is not None:
+                    return guarded
             extension = _bounded_down_extension(features, self._centers, self._radii)
             if extension is not None:
-                label, similarity, _ = extension
-                return GazeDirection(label), similarity
+                label, similarity, reason = extension
+                return GazeDirection(label), similarity, reason
             ranked = sorted(((_distance(features[:2], reference[:2]), direction)
                              for direction, reference in self._centers.items()), key=lambda pair: pair[0])
             distance, direction = ranked[0]
@@ -548,9 +594,9 @@ class Calibration:
             # Moving away from exact CENTER is insufficient: offscreen labels
             # require reaching the small core around a demonstrated target.
             if distance > radius:
-                return GazeDirection.UNKNOWN, None
+                return GazeDirection.UNKNOWN, None, "outside_reference_core"
             margin = (second_distance - distance) / max(second_distance, 1e-9)
             if margin < .12:
-                return GazeDirection.UNKNOWN, None
+                return GazeDirection.UNKNOWN, None, "ambiguous_reference_margin"
             similarity = min(1.0, max(0.0, margin * (1.0 - .5 * distance / radius)))
-            return direction, similarity
+            return direction, similarity, "within_reference_core"

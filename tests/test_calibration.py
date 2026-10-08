@@ -198,7 +198,8 @@ def test_reading_displacements_do_not_automatically_become_offscreen(direction):
 
 
 def test_signal_must_exceed_camera_resolution_floor():
-    config = replace(VisionConfig(), calibration_samples=5)
+    config = replace(VisionConfig(), calibration_samples=5,
+                     calibration_pixel_uncertainty_multiplier=3.0)
     calibration = Calibration(config)
     timestamp = 1.
     # 40-pixel eyes: a one-pixel heuristic is .025 eye widths. The required
@@ -212,6 +213,55 @@ def test_signal_must_exceed_camera_resolution_floor():
     assert pair["required_eye_separation"] == pytest.approx(.075)
     assert pair["eye_signal_noise"] == pytest.approx(2.4)
     assert pair["required_signal_noise"] == pytest.approx(3.)
+
+
+@pytest.mark.parametrize("vertical_spread", [0., .01, .0199])
+def test_small_repeatable_down_vertical_signal_passes_adjusted_pixel_gate(vertical_spread):
+    config = replace(VisionConfig(), calibration_samples=6)
+    calibration = Calibration(config)
+    references = dict(EYES_ONLY_REFERENCES)
+    references[GazeDirection.DOWN] = (.535, .5463, 0., 0.)
+    timestamp = 0.
+    for direction, reference in references.items():
+        for index in range(6):
+            row = list(reference)
+            if direction in (GazeDirection.CENTER, GazeDirection.DOWN):
+                row[1] += vertical_spread if index % 2 else -vertical_spread
+            timestamp += .1
+            assert calibration.add_sample(direction, tuple(row), timestamp, 1., noise_floor=.0906 / 3)
+    assert calibration.fit()[0]
+    pair = calibration.diagnostics["pairs"]["CENTER_DOWN"]
+    assert pair["metric_dimensions"] == 1
+    assert pair["eye_separation"] == pytest.approx(.0463)
+    assert pair["radial_eye_separation"] == pytest.approx(math.hypot(.035, .0463))
+    assert pair["threshold_contributions"]["pixel_noise_floor"] == pytest.approx(.02416)
+    assert pair["threshold_contributions"]["spread"] == pytest.approx(2 * vertical_spread)
+    assert pair["required_eye_separation"] == pytest.approx(max(.03, 2 * vertical_spread))
+    assert pair["axes"]["vertical"]["used_for_fit"]
+
+
+def test_horizontal_displacement_cannot_rescue_overlapping_down_vertical_reference():
+    references = dict(EYES_ONLY_REFERENCES)
+    references[GazeDirection.DOWN] = (.535, .501, 0., 0.)
+    calibration = make_calibration(references=references)
+    assert not calibration.fit()[0]
+    pair = calibration.diagnostics["pairs"]["CENTER_DOWN"]
+    assert pair["radial_eye_separation"] > .03
+    assert pair["eye_separation"] == pytest.approx(.001)
+    assert not pair["passed"]
+
+
+def test_adjusted_pixel_gate_still_rejects_signal_below_resolution_assumption():
+    calibration = Calibration(replace(VisionConfig(), calibration_samples=5))
+    timestamp = 0.
+    for direction, reference in EYES_ONLY_REFERENCES.items():
+        for _ in range(5):
+            timestamp += .1
+            assert calibration.add_sample(direction, reference, timestamp, 1., noise_floor=1 / 10)
+    assert not calibration.fit()[0]
+    pair = calibration.diagnostics["pairs"]["CENTER_DOWN"]
+    assert pair["required_eye_separation"] == pytest.approx(.08)
+    assert pair["dominant_contributions"] == ["pixel_noise_floor"]
 
 
 @pytest.mark.parametrize("noise_floor", (0., -.01, math.nan, math.inf))
@@ -240,7 +290,7 @@ def test_mixed_ui_glances_across_entire_interval_fail():
     assert not calibration.fit()[0]
     pair = calibration.diagnostics["pairs"]["CENTER_DOWN"]
     assert pair["eye_separation"] == pytest.approx(.03)
-    assert pair["required_eye_separation"] == pytest.approx(.075)
+    assert pair["required_eye_separation"] == pytest.approx(.06)
 
 
 def test_diagnostics_report_aggregate_counts_medians_spreads_and_rejection_reasons():

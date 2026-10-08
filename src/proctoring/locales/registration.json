@@ -1,0 +1,52 @@
+{
+  "registration.eyebrow": {
+    "en": "CANDIDATE REGISTRATION",
+    "ru": "РЕГИСТРАЦИЯ УЧАСТНИКА",
+    "kk": "ҚАТЫСУШЫНЫ ТІРКЕУ"
+  },
+  "registration.title": {
+    "en": "Introduce yourself before the exam",
+    "ru": "Представьтесь перед экзаменом",
+    "kk": "Емтихан алдында өзіңізді таныстырыңыз"
+  },
+  "registration.description": {
+    "en": "Enter your details to link the exam session and proctoring records to you. Required fields are marked with *.",
+    "ru": "Введите свои данные, чтобы связать с вами экзаменационную сессию и записи прокторинга. Обязательные поля отмечены *.",
+    "kk": "Емтихан сессиясы мен прокторинг жазбаларын өзіңізбен байланыстыру үшін деректеріңізді енгізіңіз. Міндетті өрістер * белгісімен көрсетілген."
+  },
+  "registration.first_name": {
+    "en": "First name *", "ru": "Имя *", "kk": "Аты *"
+  },
+  "registration.last_name": {
+    "en": "Last name *", "ru": "Фамилия *", "kk": "Тегі *"
+  },
+  "registration.group_required": {
+    "en": "Group / Student ID *", "ru": "Группа / Номер студента *", "kk": "Топ / Студент нөмірі *"
+  },
+  "registration.group_optional": {
+    "en": "Group / Student ID (optional)", "ru": "Группа / Номер студента (необязательно)", "kk": "Топ / Студент нөмірі (міндетті емес)"
+  },
+  "registration.continue": {
+    "en": "Proceed to Calibration", "ru": "Перейти к калибровке", "kk": "Калибрлеуге өту"
+  },
+  "registration.invalid": {
+    "en": "Enter valid candidate details in all required fields. Use single-line text without control characters.",
+    "ru": "Введите корректные данные во все обязательные поля. Используйте однострочный текст без управляющих символов.",
+    "kk": "Барлық міндетті өрістерге жарамды деректерді енгізіңіз. Басқару таңбалары жоқ бір жолды мәтінді пайдаланыңыз."
+  },
+  "registration.required": {
+    "en": "Complete candidate registration before opening the camera or starting the exam.",
+    "ru": "Завершите регистрацию участника перед включением камеры или началом экзамена.",
+    "kk": "Камераны қоспас немесе емтиханды бастамас бұрын қатысушыны тіркеуді аяқтаңыз."
+  },
+  "registration.remote_data": {
+    "en": "Session records are saved locally. Candidate details, proctoring alerts and available event snapshots are also sent to configured proctor destinations.",
+    "ru": "Записи сессии сохраняются локально. Данные участника, уведомления прокторинга и доступные снимки событий также отправляются настроенным получателям прокторинга.",
+    "kk": "Сессия жазбалары жергілікті сақталады. Қатысушы деректері, прокторинг ескертулері және қолжетімді оқиға суреттері бапталған проктор алушыларына да жіберіледі."
+  },
+  "registration.external_data": {
+    "en": "The external exam website receives its own form submissions and network requests.",
+    "ru": "Внешний сайт экзамена получает отправленные ему формы и сетевые запросы.",
+    "kk": "Сыртқы емтихан сайты өзіне жіберілген нысандар мен желілік сұрауларды алады."
+  }
+}

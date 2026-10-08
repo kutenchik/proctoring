@@ -110,14 +110,15 @@ def complete_calibration(clock, monitor, win, features=FEATURES):
 
 def collect_target(clock, monitor, win, features=FEATURES[0]):
     widget = win.calibration_widget
-    align(clock, monitor, win)
-    widget.begin_collection()
-    clock.advance(widget.preparation_seconds)
+    if not widget.guided_active:
+        align(clock, monitor, win)
+        widget.begin_collection()
+    clock.advance(max(0., widget._collection_start - clock.monotonic()))
     for _ in range(widget.required_samples):
         publish(clock, monitor, win, features)
     assert widget.collecting  # Reaching the minimum does not shorten the interval.
-    clock.advance(widget._collection_end - clock.monotonic())
-    win._refresh_camera()
+    clock.advance(widget._collection_end - clock.monotonic() - .1 + 1e-6)
+    publish(clock, monitor, win, features)
 
 
 def test_camera_not_opened_on_launch_and_start_requires_calibration(camera_window):
@@ -136,13 +137,55 @@ def test_camera_not_opened_on_launch_and_start_requires_calibration(camera_windo
     assert "Capture 30.0 FPS" in win.setup_metrics.text()
 
 
-def test_calibration_is_user_paced_then_exam_and_summary(camera_window):
+def test_reduced_eye_availability_is_explicit_and_separate_from_monitoring_health(camera_window):
+    clock, monitor, win = camera_window
+    win._open_camera()
+    eye = EyeDiagnostic(.5, .5, .05, False, "low eyelid aperture; iris visibility unverified", 40.)
+    face = FaceMeasurement(True, features=None, head_pose=HeadPose(),
+                           diagnostics=GazeDiagnostics(eye, eye, False, eye.reason))
+    monitor.latest_result = VisionResult(clock.monotonic(), face_present=True, face=face,
+                                        gaze_direction=GazeDirection.UNKNOWN, person_count=1)
+    win._refresh_camera()
+    assert "UNKNOWN" in win.gaze_label.text()
+    assert "Gaze availability reduced" in win.gaze_label.text()
+    assert eye.reason in win.gaze_label.text()
+    assert "Face: present" in win.gaze_label.text()
+    assert win.monitor_label.text() == "Monitoring healthy"
+    assert not win.start_button.isEnabled()
+
+
+def test_head_down_posture_is_visible_separately_from_unobservable_eyes(camera_window):
+    from proctoring.i18n import set_language, t
+    clock, monitor, win = camera_window
+    win._open_camera()
+    eye = EyeDiagnostic(.5, .5, .05, False, "low eyelid aperture; iris visibility unverified", 40.)
+    face = FaceMeasurement(True, features=None, head_pose=HeadPose(pitch=20.),
+                           diagnostics=GazeDiagnostics(eye, eye, False, eye.reason))
+    monitor.latest_result = VisionResult(clock.monotonic(), face_present=True, face=face,
+                                        gaze_direction=GazeDirection.UNKNOWN, person_count=1,
+                                        head_pose=face.head_pose, head_down=True)
+    win._refresh_camera()
+    assert "Eye-gaze estimate: UNKNOWN" in win.gaze_label.text()
+    assert "Head-down posture detected" in win.gaze_label.text()
+    assert "pitch 20°" in win.gaze_label.text()
+    assert win.monitor_label.text() == "Monitoring healthy"
+    for language in ("ru", "kk", "en"):
+        set_language(language)
+        assert t("monitor.head_down_posture") in win.gaze_label.text()
+    monitor.available = False
+    win._refresh_camera()
+    assert "Head-down posture detected" not in win.gaze_label.text()
+
+
+def test_calibration_is_guided_then_exam_and_summary(camera_window):
     clock, monitor, win = camera_window
     win._open_camera()
     widget = win.calibration_widget
+    assert win.setup_preview._alignment is widget.alignment_status
     collect_target(clock, monitor, win)
     assert widget.direction == GazeDirection.LEFT
     assert not widget.collecting
+    assert win.setup_preview._alignment is widget.alignment_status
     publish(clock, monitor, win)
     assert monitor.calibration.counts[GazeDirection.LEFT] == 0
     for features in FEATURES[1:]:
@@ -152,6 +195,8 @@ def test_calibration_is_user_paced_then_exam_and_summary(camera_window):
     QTest.mouseClick(win.start_button, Qt.MouseButton.LeftButton)
     assert win.controller.session.running
     assert win.stack.currentWidget() is win.exam_page
+    assert win.setup_preview._alignment is None
+    assert win.preview._alignment is None
     assert "People: 1" in win.gaze_label.text()
     assert "yaw 3°" in win.gaze_label.text()
     assert "(mock)" not in win.gaze_label.text()
@@ -178,7 +223,8 @@ def test_calibration_rejects_duplicate_stale_low_quality_and_absent_faces(camera
     publish(clock, monitor, win, age=3.0)
     publish(clock, monitor, win, quality=.1)
     publish(clock, monitor, win, face_present=False)
-    assert monitor.calibration.counts[GazeDirection.CENTER] == 1
+    assert monitor.calibration.counts[GazeDirection.CENTER] == 0
+    assert widget._target_failed
     assert not win.start_button.isEnabled()
 
 
@@ -370,3 +416,56 @@ def test_debug_controls_remain_reachable_on_small_screen(camera_window, qt_app):
         qt_app.processEvents()
         position = control.mapTo(win.setup_page.viewport(), control.rect().center())
         assert win.setup_page.viewport().rect().contains(position)
+
+
+@pytest.mark.parametrize("camera_window", [True], indirect=True)
+def test_candidate_reading_returns_to_setup_for_eye_challenges_without_starting_exam(camera_window):
+    clock, monitor, win = camera_window
+    weak = [(0.5, 0.5, 0., 0.), (0.48, 0.5, 0., 0.),
+            (0.52, 0.5, 0., 0.), (0.5, 0.52, 0., 0.)]
+    complete_calibration(clock, monitor, win, weak)
+    baseline = monitor.calibration.export_snapshot()
+    assert not monitor.calibration.ready
+    win.calibration_widget.diagnostics_panel.setChecked(True)
+    panel = win.calibration_widget.diagnostic_workflow
+    panel.candidate_enabled.setChecked(True)
+    panel.begin_validation()
+    targets = panel.validation.targets
+    assert len(targets) == 9
+    remaining = win.controller.session.remaining_seconds
+    for target in targets:
+        assert panel.validation.targets[panel._index] == target
+        assert win.stack.currentWidget() is win.setup_page
+        panel.prepare_target()
+        assert win.stack.currentWidget() is (win.exam_page if target == "READING" else win.setup_page)
+        clock.advance(panel.preparation_seconds)
+        features = weak[targets.index(target)] if target in targets[:4] else weak[0]
+        for _ in range(3):
+            if target in ("BLINK", "BRIEF_CLOSURE", "SUSTAINED_CLOSURE"):
+                clock.advance(.1)
+                eye = EyeDiagnostic(.5, .5, .05, False, "iris visibility unverified", 40.)
+                face = FaceMeasurement(True, features=None, head_pose=HeadPose(),
+                                       diagnostics=GazeDiagnostics(eye, eye, False, eye.reason))
+                monitor.latest_result = VisionResult(clock.monotonic(), face_present=True, face=face)
+                win._refresh_camera()
+            else:
+                publish(clock, monitor, win, features)
+        clock.advance(panel._end - clock.monotonic())
+        win._refresh_camera()
+        if target == "READING":
+            assert panel.active
+            assert panel.validation.targets[panel._index] == "BLINK"
+            assert "blink normally" in panel.validation_status.text()
+            assert win.question_index == 0
+        assert win.stack.currentWidget() is win.setup_page
+        assert not win.controller.session.started
+        assert win.controller.session.remaining_seconds == remaining
+        assert win.controller.store is None
+        assert win.controller.review_events == []
+        assert not win.controller.protection.blocking_enabled
+    report = panel.selected_attempt["validation"]
+    assert report["collection_complete"]
+    assert report["source_attempt_identity"] == panel.selected_attempt["attempt_identity"]
+    assert report["targets"]["SUSTAINED_CLOSURE"]["invalid_measurements"] == 3
+    assert monitor.calibration.export_snapshot() == baseline
+    assert not win.start_button.isEnabled()

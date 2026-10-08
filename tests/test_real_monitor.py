@@ -117,16 +117,48 @@ def test_calibration_snapshot_uses_capture_time_without_refreshing_or_mixing_pai
     first_face = FaceMeasurement(True, features=(.5, .5, 0., 0.), quality=1.)
     with monitor._lock:
         monitor._latest_face, monitor._latest_face_timestamp = first_face, 10.
+        monitor._face_latency_ms = 12.5
     first = monitor.latest_calibration_result
     assert first.timestamp == 10. and first.face is first_face
+    assert first.face_latency_ms == 12.5
     assert monitor.latest_calibration_result.timestamp == 10.
     second_face = FaceMeasurement(True, features=(.5, .6, 0., 0.), quality=1.)
     with monitor._lock:
         monitor._latest_face, monitor._latest_face_timestamp = second_face, 11.
+        monitor._face_latency_ms = 18.75
     assert first.timestamp == 10. and first.face is first_face
     assert monitor.latest_calibration_result.timestamp == 11.
     assert monitor.latest_calibration_result.face is second_face
+    assert monitor.latest_calibration_result.face_latency_ms == 18.75
+    assert first.face_latency_ms == 12.5
     assert monitor.latest_result is None  # Face-only result is never exam evidence.
+
+
+def test_debug_closeups_receive_exact_face_source_frame_not_newest_camera_image():
+    monitor = make_monitor(replace(VisionConfig(), calibration_debug=True, yolo_fps=1., face_fps=100.))
+    try:
+        monitor.start()
+        eventually(lambda: monitor.available)
+        paired = monitor.latest_calibration_result
+        first_frame = monitor._camera.latest
+        assert paired.timestamp == first_frame.timestamp
+        assert paired.frame is first_frame.image
+        original_observation = monitor.sample(monitor.clock.monotonic())
+        time.sleep(.02)
+        monitor._camera.refresh()
+        next_frame = monitor._camera.latest
+        eventually(lambda: monitor.latest_face_timestamp == next_frame.timestamp)
+        next_pair = monitor.latest_calibration_result
+        assert next_pair.frame is next_frame.image
+        assert next_pair.timestamp == next_frame.timestamp
+        assert paired.frame is first_frame.image  # Published pairs do not drift.
+        assert paired.timestamp == first_frame.timestamp
+        assert next_pair.frame is not paired.frame
+        assert next_pair.persons == () and next_pair.phones == ()
+        assert monitor.latest_result.timestamp == original_observation.timestamp
+        assert monitor.sample(monitor.clock.monotonic()) is None  # No refreshed YOLO/evidence.
+    finally:
+        monitor.stop()
 
 
 def test_camera_read_error_immediately_blocks_samples():

@@ -3,22 +3,29 @@ from __future__ import annotations
 import math
 import os
 import threading
+from dataclasses import replace
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal, QSignalBlocker
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QDialog,
-    QDialogButtonBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QLayout, QLineEdit, QMainWindow, QProgressBar, QPushButton,
-    QRadioButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QApplication, QButtonGroup, QComboBox, QDialog,
+    QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout,
+    QHeaderView, QLayout, QLineEdit, QMainWindow,
+    QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from ..controller import AppController
 from ..domain import EventType
+from ..i18n import manager, set_language, translate_text, t
+from .i18n_widgets import (QLabel, QPushButton, QCheckBox, QGroupBox,
+                           QProgressBar, QRadioButton, source_text)
 from ..security import HeartbeatWatchdog, PinVerifier
 from .calibration import CalibrationWidget
+from .audio_check import AudioCheckWidget
 from .preview import CameraPreview
+from .registration import RegistrationWidget
+from .screen_target import ScreenTarget, position_metadata
 
 
 STYLE = """
@@ -73,7 +80,6 @@ class PinDialog(QDialog):
     def __init__(self, verifier: PinVerifier, action: str, parent=None):
         super().__init__(parent)
         self.verifier = verifier
-        self.setWindowTitle("Proctor authorization")
         self.setMinimumWidth(350)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -99,6 +105,14 @@ class PinDialog(QDialog):
             self.recovery_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Alt+Q"), self)
             self.recovery_shortcut.activated.connect(parent._emergency)
         self.pin_edit.setFocus()
+        manager.language_changed.connect(self.retranslate_ui)
+        self.retranslate_ui()
+
+    def retranslate_ui(self, *_):
+        self.setWindowTitle(translate_text("Proctor authorization"))
+        self.pin_edit.setPlaceholderText(translate_text("Proctor PIN"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(t("common.ok"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(t("common.cancel"))
 
     def _check(self) -> None:
         if self.verifier.verify(self.pin_edit.text()):
@@ -115,14 +129,24 @@ class MainWindow(QMainWindow):
     def __init__(self, controller: AppController, enable_watchdog: bool = True):
         super().__init__()
         self.controller = controller
+        set_language(controller.config.ui.language)
         self.camera_mode = getattr(controller, "mode", "synthetic") == "camera"
+        self.external_exam = bool(controller.config.external_url)
+        self.browser = None
         self.question_index = 0
         self._diagnostic_reading = False
         self._diagnostic_question_index = None
+        self._diagnostic_target_name = ""
+        self._diagnostic_target_position = None
+        self._diagnostic_region_geometry = None
+        self._diagnostic_banner_limits = None
+        self._guided_geometry = None
+        self._guided_target_name = ""
         self.active_pin_dialog: PinDialog | None = None
         self._contained = False
         self._windowed_geometry = None
         self._restoring_window = False
+        self._report_close_pending = False
         self._watchdog_stop = threading.Event()
         self._watchdog_thread: threading.Thread | None = None
         self.setWindowTitle("Local Proctoring · Camera Demo" if self.camera_mode else "Local Proctoring · Synthetic Demo")
@@ -130,10 +154,44 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1040, 760)
         self.setStyleSheet(STYLE)
         self.stack = QStackedWidget()
-        self.setCentralWidget(self.stack)
+        central = QWidget()
+        central_layout = QVBoxLayout(central)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        language_header = QHBoxLayout()
+        language_header.setContentsMargins(28, 8, 28, 0)
+        language_header.addStretch()
+        language_header.addWidget(label("Language"))
+        self.language_selector = QComboBox()
+        self.language_selector.setObjectName("languageSelector")
+        for name, code in (("EN", "en"), ("RU", "ru"), ("ҚАЗ", "kk")):
+            self.language_selector.addItem(name, code)
+        self.language_selector.setCurrentIndex(self.language_selector.findData(manager.language))
+        self.language_selector.currentIndexChanged.connect(self._select_language)
+        language_header.addWidget(self.language_selector)
+        central_layout.addLayout(language_header)
+        central_layout.addWidget(self.stack, 1)
+        self.setCentralWidget(central)
+        self.registration_widget = None
+        self.registration_page = None
+        self.audio_check_widget = None
+        if not controller.registration_complete or (controller.config.identity.selfie_verification_enabled
+                                                    and not controller.identity_ready):
+            self._build_registration()
         self._build_setup()
         self._build_exam()
         self._build_summary()
+        self.preflight_label = label("", "banner", True)
+        central_layout.insertWidget(1, self.preflight_label)
+        self.optional_status_label = label("", "subtitle", True)
+        self.optional_status_label.setStyleSheet("padding: 0 28px 6px 28px; color: #5c7081;")
+        central_layout.insertWidget(2, self.optional_status_label)
+        self.setup_page.setEnabled(controller.registration_complete)
+        if self.registration_page is not None:
+            self.stack.setCurrentWidget(self.registration_page)
+            self.registration_widget.first_name.setFocus()
+        self.screen_target = ScreenTarget(self.stack)
+        if self.camera_mode:
+            self.calibration_widget.diagnostic_workflow.target_metadata_provider = self._diagnostic_target_metadata
         self.shortcut = QShortcut(QKeySequence("Ctrl+Shift+Alt+Q"), self)
         self.shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.shortcut.activated.connect(self._emergency)
@@ -151,6 +209,39 @@ class MainWindow(QMainWindow):
         self.timer.start()
         controller.protection.configure_window(int(self.winId()), os.getpid())
         self._refresh()
+        manager.language_changed.connect(self.retranslate_ui)
+        self.retranslate_ui()
+
+    def _select_language(self, index: int) -> None:
+        code = self.language_selector.itemData(index)
+        if code:
+            set_language(code)
+
+    def retranslate_ui(self, *_):
+        """Render cached presentation text only; never advance calibration/timers."""
+        with QSignalBlocker(self.language_selector):
+            self.language_selector.setCurrentIndex(self.language_selector.findData(manager.language))
+        self.controller.config = replace(self.controller.config,
+                                         ui=replace(self.controller.config.ui, language=manager.language))
+        self.setWindowTitle(translate_text("Local Proctoring · Camera Demo" if self.camera_mode else
+                                          "Local Proctoring · Synthetic Demo"))
+        self.language_selector.setAccessibleName(translate_text("Language"))
+        self.language_selector.setToolTip(translate_text("Language"))
+        self.timer_label.setAccessibleName(translate_text("Time remaining"))
+        self.timer_label.setToolTip(translate_text("Time remaining"))
+        self.event_table.setHorizontalHeaderLabels([translate_text(value) for value in
+            ("Started (UTC)", "Review event", "State", "Duration", "Confidence")])
+        # Translated headings and status words need more room than English.
+        for column in (0, 2, 3, 4):
+            self.event_table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        for row in range(self.event_table.rowCount()):
+            for column in range(self.event_table.columnCount()):
+                item = self.event_table.item(row, column)
+                if item is not None:
+                    original = item.data(Qt.ItemDataRole.UserRole)
+                    if original is not None:
+                        item.setText(translate_text(original))
+                        item.setToolTip(translate_text(original))
 
     def _watchdog_loop(self) -> None:
         while not self._watchdog_stop.wait(.25):
@@ -166,6 +257,70 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(page)
         return page, layout
 
+    def _build_registration(self) -> None:
+        self.registration_widget = RegistrationWidget(
+            require_group=self.controller.config.registration.require_group,
+            identity_enabled=self.controller.config.identity.selfie_verification_enabled)
+        self.registration_widget.submitted.connect(self._submit_registration)
+        self.registration_widget.identity_open_requested.connect(self._prepare_identity)
+        self.registration_widget.identity_capture_requested.connect(self._capture_identity)
+        self.registration_widget.layout().addWidget(label(self._data_description(), "subtitle", True))
+        self.registration_page = self.registration_widget
+        if self.controller.config.identity.selfie_verification_enabled:
+            # The selfie preview adds vertical content. Honor the preview and
+            # form minimum sizes, keeping controls reachable on laptop screens.
+            self.registration_widget.layout().setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+            self.registration_page = QScrollArea()
+            self.registration_page.setWidgetResizable(True)
+            self.registration_page.setFrameShape(QFrame.Shape.NoFrame)
+            self.registration_page.setWidget(self.registration_widget)
+        self.stack.addWidget(self.registration_page)
+
+    def _prepare_identity(self, info: dict) -> None:
+        try:
+            self.controller.prepare_identity(info)
+        except (ValueError, RuntimeError, OSError) as error:
+            self.registration_widget.set_identity_state(ready=False, status=str(error))
+            return
+        self.registration_widget.identity_started()
+        self._refresh_optional()
+
+    def _capture_identity(self) -> None:
+        try:
+            self.controller.capture_identity_baseline()
+        except (ValueError, RuntimeError, OSError) as error:
+            self.registration_widget.set_identity_state(ready=False, status=str(error))
+            return
+        self._refresh_optional()
+
+    def _submit_registration(self, info: dict[str, str]) -> None:
+        if self.controller.config.identity.selfie_verification_enabled and not self.controller.identity_ready:
+            self.registration_widget.show_submission_error("identity.required")
+            return
+        try:
+            self.controller.register_candidate(info)
+        except (ValueError, RuntimeError):
+            self.registration_widget.show_submission_error()
+            return
+        self.registration_widget.setEnabled(False)
+        self.setup_page.setEnabled(True)
+        self.stack.setCurrentWidget(self.setup_page)
+        self._refresh_optional()
+        if self.camera_mode:
+            self.open_camera_button.setFocus()
+        else:
+            self.start_button.setFocus()
+
+    def _require_registration(self) -> bool:
+        identity_required = (self.controller.config.identity.selfie_verification_enabled
+                             and not self.controller.identity_ready)
+        if self.controller.registration_complete and not identity_required:
+            return True
+        if self.registration_widget is not None:
+            self.registration_widget.show_submission_error("identity.required" if identity_required else "registration.required")
+            self.stack.setCurrentWidget(self.registration_page)
+        return False
+
     def _build_setup(self) -> None:
         if self.camera_mode:
             self._build_camera_setup()
@@ -180,13 +335,16 @@ class MainWindow(QMainWindow):
             "This build uses synthetic observations. No webcam is opened, no gaze calibration is performed, "
             "and Windows keyboard/window blocking is disabled.", "banner", True))
         content.addWidget(label(
-            f"{self.controller.quiz.total} multiple-choice questions · "
+            f"{self._exam_description()} · "
             f"{self.controller.config.duration_seconds / 60:g} minutes\n\n"
             "Exercise the event thresholds using the monitoring controls. Review warnings never pause the exam. "
             "Monitoring failure pauses the quiz and timer; prolonged interruptions require the proctor PIN.", wrap=True))
         content.addWidget(label(
             "Launch without --synthetic to use webcam monitoring and session calibration. "
             "Snapshots are configured but unavailable with synthetic observations.", "subtitle", True))
+        if self.controller.config.audio.enabled:
+            self.audio_check_widget = AudioCheckWidget(self.controller.audio, self.controller.config.audio)
+            content.addWidget(self.audio_check_widget)
         self.start_button = QPushButton("Start demo exam")
         self.start_button.setObjectName("primary")
         self.start_button.clicked.connect(self._start)
@@ -196,7 +354,31 @@ class MainWindow(QMainWindow):
         content.addWidget(self.setup_error)
         layout.addWidget(pane)
         layout.addStretch()
-        layout.addWidget(label("All session data stays on this computer.", "subtitle"))
+        layout.addWidget(label(self._data_description(), "subtitle", True))
+        if self.audio_check_widget is not None:
+            layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+            body = self.setup_page
+            self.stack.removeWidget(body)
+            self.setup_page = QScrollArea()
+            self.setup_page.setWidgetResizable(True)
+            self.setup_page.setFrameShape(QFrame.Shape.NoFrame)
+            self.setup_page.setWidget(body)
+            self.stack.insertWidget(0, self.setup_page)
+
+    def _exam_description(self) -> str:
+        return ("External web exam" if self.external_exam else
+                f"{self.controller.quiz.total} multiple-choice questions")
+
+    def _data_description(self) -> str:
+        if self.controller.config.remote.enabled:
+            description = (
+                "Session records are saved locally. Candidate details, proctoring alerts and available event snapshots "
+                "are also sent to configured proctor destinations.")
+            if self.external_exam:
+                description += "\nThe external exam website receives its own form submissions and network requests."
+            return description
+        return ("Proctoring data stays local. The external exam website receives its own form submissions and network requests."
+                if self.external_exam else "All session data stays on this computer.")
 
     def _build_camera_setup(self) -> None:
         self.setup_page, layout = self._page()
@@ -204,12 +386,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(label("Prepare your camera and calibrate your gaze", "title"))
         protection_note = ("Windows protection will activate when the calibrated exam starts."
                            if self.controller.protection.blocking_enabled else "Windows protection is disabled in safe mode.")
-        layout.addWidget(label(f"All processing stays on this computer. {protection_note}",
+        layout.addWidget(label(f"{self._data_description()} {protection_note}",
                                "banner", True))
         columns = QHBoxLayout()
         instructions, content = card()
         content.addWidget(label(
-            f"{self.controller.quiz.total} multiple-choice questions · "
+            f"{self._exam_description()} · "
             f"{self.controller.config.duration_seconds / 60:g} minutes", "eyebrow"))
         content.addWidget(label(
             "Open the camera, sit comfortably with your face and eyes visible, then collect four gaze directions. "
@@ -225,10 +407,15 @@ class MainWindow(QMainWindow):
             clock=self.controller.clock.monotonic,
             preparation_seconds=self.controller.config.vision.calibration_preparation_seconds,
             collection_seconds=self.controller.config.vision.calibration_collection_seconds,
-            diagnostics_enabled=self.controller.config.vision.calibration_debug)
+            max_collection_seconds=self.controller.config.vision.calibration_max_collection_seconds,
+            diagnostics_enabled=self.controller.config.vision.calibration_debug,
+            event_thresholds=self.controller.config.thresholds,
+            clearing_seconds=self.controller.config.clearing_seconds)
         self.calibration_widget.changed.connect(self._refresh_camera)
         self.calibration_widget.validation_active_changed.connect(self._diagnostic_validation_state)
         self.calibration_widget.validation_target_changed.connect(self._diagnostic_validation_target)
+        self.calibration_widget.guided_active_changed.connect(self._guided_calibration_state)
+        self.calibration_widget.guided_target_changed.connect(self._guided_calibration_target)
         content.addWidget(self.calibration_widget)
         content.addWidget(label(
             "Eye gaze is an approximate estimate from iris landmarks and this session's samples. Head pose is shown separately. "
@@ -248,6 +435,9 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.setup_preview, 1)
         self.setup_metrics = label("Waiting for monitoring", "subtitle", True)
         preview_layout.addWidget(self.setup_metrics)
+        if self.controller.config.audio.enabled:
+            self.audio_check_widget = AudioCheckWidget(self.controller.audio, self.controller.config.audio)
+            preview_layout.addWidget(self.audio_check_widget)
         columns.addWidget(camera, 1)
         layout.addLayout(columns, 1)
         layout.addWidget(label("Person = green · Phone = amber · Primary face = dotted blue", "subtitle"))
@@ -281,6 +471,19 @@ class MainWindow(QMainWindow):
         layout.addLayout(header)
         self.session_banner = label("", "banner", True)
         layout.addWidget(self.session_banner)
+        self.collection_controls = QWidget()
+        collection_controls_layout = QHBoxLayout(self.collection_controls)
+        collection_controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.collection_pause = QPushButton("Pause calibration")
+        self.collection_retry = QPushButton("Retry this target")
+        self.collection_cancel = QPushButton("Cancel calibration")
+        self.collection_pause.clicked.connect(self._pause_diagnostic_collection)
+        self.collection_retry.clicked.connect(self._retry_diagnostic_collection)
+        self.collection_cancel.clicked.connect(self._cancel_diagnostic_collection)
+        for button in (self.collection_pause, self.collection_retry, self.collection_cancel):
+            collection_controls_layout.addWidget(button)
+        self.collection_controls.hide()
+        layout.addWidget(self.collection_controls)
         columns = QHBoxLayout()
         columns.setSpacing(18)
         self.quiz_card, quiz_layout = card()
@@ -311,7 +514,16 @@ class MainWindow(QMainWindow):
         quiz_layout.addLayout(nav)
         self.answers_label = label("", "subtitle")
         quiz_layout.addWidget(self.answers_label)
-        columns.addWidget(self.quiz_card, 1)
+        # Keep the native quiz for its existing calibration reading targets.
+        # No browser is even constructed in native mode, including headless CI.
+        self.exam_content = QStackedWidget()
+        self.exam_content.addWidget(self.quiz_card)
+        if self.external_exam:
+            from .browser import SecureBrowserWidget
+            self.browser = SecureBrowserWidget(
+                self.controller.config.external_url, self.controller.config.allowed_domains)
+            self.exam_content.addWidget(self.browser)
+        columns.addWidget(self.exam_content, 1)
 
         monitor_card, monitor_layout = card()
         monitor_layout.setSpacing(10)
@@ -433,8 +645,20 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
     def _start(self) -> None:
+        if not self._require_registration():
+            return
+        preflight = self.controller.preflight_status()
+        if not preflight["ready"]:
+            self.setup_error.setText(preflight["reason"])
+            return
+        if (self.camera_mode and self.calibration_widget.diagnostic_workflow.screen_region_enabled.isChecked()):
+            self.setup_error.setText("Screen-region experiment cannot start an exam. Leave experimental mode to use normal calibration.")
+            return
         if (self.camera_mode and self.calibration_widget.validation_active):
             self.setup_error.setText("Finish or cancel the diagnostic validation pass before starting an exam.")
+            return
+        if self.browser is not None and not self.browser.available:
+            self.setup_error.setText(self.browser.unavailable_reason)
             return
         try:
             self.controller.start()
@@ -442,14 +666,71 @@ class MainWindow(QMainWindow):
             self.setup_error.setText(f"Could not start: {error}")
             return
         self.watchdog.heartbeat()
+        if self.browser is not None:
+            self.exam_content.setCurrentWidget(self.browser)
+            try:
+                self.browser.start_exam()
+            except (OSError, ValueError, RuntimeError) as error:
+                self.controller.end("browser_start_failed")
+                self._refresh()
+                self.summary_text.setText(source_text(self.summary_text) + f"\nBrowser error: {error}")
+                return
         self.stack.setCurrentWidget(self.exam_page)
         self._refresh()
+
+    def _guided_calibration_state(self, active: bool) -> None:
+        if active:
+            if self._guided_geometry is None:
+                self._guided_geometry = (self.saveGeometry(), self.isMaximized())
+                self.showMaximized()
+            self.start_button.setEnabled(False)
+        else:
+            self._guided_calibration_target("")
+            if self._guided_geometry is not None:
+                geometry, was_maximized = self._guided_geometry
+                self._guided_geometry = None
+                if not was_maximized:
+                    self.showNormal()
+                    self.restoreGeometry(geometry)
+
+    def _guided_calibration_target(self, target: str) -> None:
+        self._guided_target_name = target
+        # Only CENTER is on-screen in the four-target protocol. The other
+        # directions refer to the physical screen edges, with no fake marker.
+        point = self.stack.mapFromGlobal(self.screen().geometry().center()) if target == "CENTER" else None
+        self.screen_target.set_point(point)
+
+    def _pause_diagnostic_collection(self):
+        self.calibration_widget.diagnostic_workflow.pause_collection()
+
+    def _retry_diagnostic_collection(self):
+        self.calibration_widget.diagnostic_workflow.retry_target()
+
+    def _cancel_diagnostic_collection(self):
+        self.calibration_widget.diagnostic_workflow.cancel_validation()
 
     def _diagnostic_validation_state(self, active: bool) -> None:
         if active:
             self.start_button.setEnabled(False)
+            if self.calibration_widget.diagnostic_workflow.screen_region_active:
+                self._diagnostic_region_geometry = (self.saveGeometry(), self.isMaximized())
+                self._diagnostic_banner_limits = (self.session_banner.minimumHeight(), self.session_banner.maximumHeight())
+                self.session_banner.setFixedHeight(112)
+                self.showMaximized()
         else:
             self._diagnostic_validation_target("")
+            if self._diagnostic_region_geometry is not None:
+                geometry, was_maximized = self._diagnostic_region_geometry
+                self._diagnostic_region_geometry = None
+                if not was_maximized:
+                    self.showNormal()
+                    self.restoreGeometry(geometry)
+            if self._diagnostic_banner_limits is not None:
+                minimum, maximum = self._diagnostic_banner_limits
+                self._diagnostic_banner_limits = None
+                self.session_banner.setMinimumHeight(minimum)
+                self.session_banner.setMaximumHeight(maximum)
+            self.collection_controls.hide()
 
     def _diagnostic_validation_target(self, target: str) -> None:
         """Show actual quiz text at its exam position, without starting a session.
@@ -458,7 +739,9 @@ class MainWindow(QMainWindow):
         its setup page is hidden. No answer, timer, event or evidence method is
         called; all quiz controls remain disabled until a real session starts.
         """
-        if target == "READING":
+        panel = self.calibration_widget.diagnostic_workflow
+        is_region = bool(target and panel.screen_region_active)
+        if target == "READING" or is_region:
             if (self.controller.session.started or self.controller.protection.blocking_enabled
                     or not self.controller.config.vision.calibration_debug):
                 return
@@ -467,6 +750,9 @@ class MainWindow(QMainWindow):
                 self.question_index = min(1, self.controller.quiz.total - 1)
                 self._show_question()
             self._diagnostic_reading = True
+            self.exam_content.setCurrentWidget(self.quiz_card)
+            self.collection_controls.setVisible(is_region)
+            self._diagnostic_target_name = target
             self.quiz_card.setEnabled(False)
             self.end_button.setEnabled(False)
             self.session_banner.setText(
@@ -474,15 +760,64 @@ class MainWindow(QMainWindow):
                 "No exam is running; these predictions do not create review events.")
             self.stack.setCurrentWidget(self.exam_page)
             self.exam_page.verticalScrollBar().setValue(0)
+            QApplication.processEvents()
+            self._position_diagnostic_target()
         elif self._diagnostic_reading:
             self._diagnostic_reading = False
+            self._diagnostic_target_name = ""
+            self._diagnostic_target_position = None
+            self.screen_target.set_point(None)
             self.question_index = self._diagnostic_question_index or 0
             self._diagnostic_question_index = None
             self._show_question()
             self.end_button.setEnabled(True)
             self.stack.setCurrentWidget(self.setup_page)
+            self.collection_controls.hide()
+
+    def _diagnostic_layout_widgets(self):
+        return {"quiz": self.question_label, "options": self.options_host,
+                "controls": self.end_button, "monitor": self.preview}
+
+    def _position_diagnostic_target(self):
+        panel = self.calibration_widget.diagnostic_workflow
+        spec = panel.current_target_spec if panel.screen_region_active else {}
+        requested = spec.get("requested_position") or {}
+        position = ((requested.get("x_normalized"), requested.get("y_normalized"))
+                    if requested else spec.get("widget_anchor"))
+        point = None
+        if isinstance(position, (tuple, list)) and len(position) == 2:
+            # Center is physically on the screen; boundary targets use the
+            # actual visible client area, whose coordinates are exported.
+            if tuple(position) == (.5, .5):
+                point = self.stack.mapFromGlobal(self.screen().geometry().center())
+            else:
+                point = QPoint(round(position[0] * self.stack.width()),
+                               round(position[1] * self.stack.height()))
+        elif position in self._diagnostic_layout_widgets():
+            target_widget = self._diagnostic_layout_widgets()[position]
+            point = self.stack.mapFromGlobal(target_widget.mapToGlobal(target_widget.rect().center()))
+        self._diagnostic_target_position = point
+        self.screen_target.set_point(point)
+
+    def _diagnostic_target_metadata(self):
+        """Numerical target/layout provenance only; no screenshots are saved."""
+        self._position_diagnostic_target()
+        data = position_metadata(self.stack, self._diagnostic_target_position)
+        data["visible_layout_regions"] = {
+            name: position_metadata(widget, widget.rect().center())
+            for name, widget in self._diagnostic_layout_widgets().items()
+        }
+        if self._diagnostic_target_position is not None:
+            desktop = self.stack.mapToGlobal(self._diagnostic_target_position)
+            data["target_visible_inside_client"] = (self.stack.rect().contains(self._diagnostic_target_position)
+                                                     and self.screen().geometry().contains(desktop))
+        else:
+            data["physical_target"] = "operator-known off-screen target or natural reading/challenge; no inferred coordinate"
+        return data
 
     def _open_camera(self) -> None:
+        if not self._require_registration():
+            return
         self.setup_error.clear()
         self.monitor_error.clear()
         try:
@@ -494,6 +829,8 @@ class MainWindow(QMainWindow):
         self._refresh_camera()
 
     def _retry_camera(self) -> None:
+        if not self._require_registration():
+            return
         # The controller observes the outage before a restarted worker can
         # publish results, preserving the existing recovery/timer behavior.
         self.controller.monitor.stop()
@@ -543,21 +880,49 @@ class MainWindow(QMainWindow):
             calibration_result = getattr(monitor, "latest_calibration_result", result)
             self.calibration_widget.feed_result(calibration_result, now, health.healthy)
             current_preview.set_alignment(self.calibration_widget.alignment_status)
-            self.start_button.setEnabled(health.healthy and monitor.calibration.ready
-                                         and not self.calibration_widget.validation_active)
+            self.start_button.setEnabled(self.controller.registration_complete and health.healthy and monitor.calibration.ready
+                                         and self.controller.preflight_status()["ready"]
+                                         and (not self.controller.config.identity.selfie_verification_enabled or self.controller.identity_ready)
+                                         and not self.calibration_widget.guided_active
+                                         and not self.calibration_widget.validation_active
+                                         and not self.calibration_widget.diagnostic_workflow.screen_region_enabled.isChecked())
+            if self._guided_target_name:
+                self._guided_calibration_target(self._guided_target_name)
         else:
             self.setup_preview.set_alignment(None)
             self.preview.set_alignment(None)
+            self.calibration_widget.eye_closeups.feed_result(None, now, False)
         current_preview.set_frame(frame, result, health.healthy, health.reason)
         gaze = "UNKNOWN" if result is None or not health.healthy else result.gaze_direction.value
         text = f"Eye-gaze estimate: {gaze}"
+        workflow = self.calibration_widget.diagnostic_workflow
+        if workflow.screen_region_active and workflow.validation.screen_region_phase == "validation":
+            prediction = workflow.validation.latest_region_prediction
+            if prediction is not None and health.healthy and 0 <= now - prediction["timestamp"] < workflow.max_age:
+                gaze = prediction["region_predicted_label"]
+                text = (f"DEBUG / UNVALIDATED · Region: {prediction['region_predicted_label']}"
+                        f" · Point baseline: {prediction['predicted_label']}"
+                        f"\n{prediction['region_prediction_reason']}")
+            else:
+                text = "DEBUG / UNVALIDATED · Region: UNKNOWN · waiting for a fresh validation measurement"
         if result is not None and health.healthy:
             text += f" · People: {result.person_count} · Face: {'present' if result.face_present else 'absent'}"
+            if gaze == "UNKNOWN" and result.face_present:
+                eyes = getattr(getattr(result, "face", None), "diagnostics", None)
+                reason = getattr(eyes, "reason", "")
+                text += f"\nGaze availability reduced · {reason or 'no reliable calibrated eye-gaze estimate'}"
             if result.head_pose is not None:
                 pose = result.head_pose
                 text += f"\nHead pose · yaw {pose.yaw:.0f}° · pitch {pose.pitch:.0f}° · roll {pose.roll:.0f}°"
+            if result.head_down:
+                text += "\nHead-down posture detected · contributes to DOWN review; eye gaze is separate"
         self.gaze_label.setText(text)
         self.retry_camera_button.setVisible(not health.healthy and not self.controller.session.ended)
+        if self._diagnostic_reading and workflow.screen_region_active:
+            self.session_banner.setText(source_text(workflow.validation_status))
+            self.collection_pause.setText(source_text(workflow.pause_button))
+            self.collection_pause.setEnabled(workflow.pause_button.isEnabled())
+            self.collection_retry.setEnabled(workflow.retry_target_button.isEnabled())
 
     def _show_question(self) -> None:
         quiz = self.controller.quiz
@@ -626,8 +991,55 @@ class MainWindow(QMainWindow):
         # must not keep restrictions alive after the Qt event loop stalls.
         self.controller.protection.heartbeat()
         self.watchdog.heartbeat()
+        self.controller.poll_optional_workers()
         self.controller.step()
         self._refresh()
+
+    def _refresh_optional(self) -> None:
+        if self.audio_check_widget is not None:
+            started = self.controller.session.started
+            self.audio_check_widget.set_exam_active(started)
+            if (not started and self.controller.registration_complete
+                    and self.stack.currentWidget() is self.setup_page):
+                self.controller.prepare_audio_check()
+        status = self.controller.preflight_status()
+        self.preflight_label.setText(status.get("reason", ""))
+        self.preflight_label.setVisible(bool(status.get("reason")))
+        if not self.camera_mode and not self.controller.session.started:
+            self.start_button.setEnabled(self.controller.registration_complete and status["ready"]
+                                         and (not self.controller.config.identity.selfie_verification_enabled
+                                              or self.controller.identity_ready))
+        if self.registration_widget is not None and self.controller.config.identity.selfie_verification_enabled:
+            self.registration_widget.set_identity_state(
+                ready=self.controller.identity_ready, status=self.controller.identity_status,
+                can_capture=self.controller.identity_can_capture)
+            monitor = self.controller.monitor
+            result = getattr(monitor, "latest_result", None)
+            healthy = self.camera_mode and monitor.health(self.controller.clock.monotonic()).healthy
+            # Same result/frame as the worker; no second webcam or image recording.
+            frame = getattr(result, "frame", None) if result is not None else None
+            self.registration_widget.set_identity_preview(frame, result, healthy)
+        messages = []
+        if (self.controller.config.identity.selfie_verification_enabled and self.controller.session.started
+                and not self.controller.session.ended):
+            messages.append(self.controller.identity_status)
+        if (self.controller.config.vision.accessories.earphone_detection_enabled
+                and self.controller.session.started and not self.controller.session.ended):
+            result = getattr(self.controller.monitor, "latest_result", None)
+            message = getattr(result, "earphone_status", "") if result is not None else ""
+            if message:
+                messages.append(message)
+        if self.controller.config.audio.enabled and self.controller.session.started:
+            message = getattr(self.controller, "audio_status", "")
+            if message:
+                messages.append(message)
+        if self.controller.config.reporting.generate_pdf_report:
+            report = getattr(self.controller, "report_status", "disabled")
+            key = "report.closing" if self._report_close_pending else f"report.{report}"
+            if report != "disabled":
+                messages.append(t(key))
+        self.optional_status_label.setText("\n".join(messages))
+        self.optional_status_label.setVisible(bool(messages))
 
     def _sync_protection_window(self) -> None:
         protected = (self.controller.protection.blocking_enabled
@@ -670,6 +1082,7 @@ class MainWindow(QMainWindow):
 
     def _refresh(self) -> None:
         controller, session = self.controller, self.controller.session
+        self._refresh_optional()
         self._sync_protection_window()
         self.protection_label.setText(f"Protection: {controller.protection.status}")
         self.protection_label.setStyleSheet(
@@ -680,6 +1093,11 @@ class MainWindow(QMainWindow):
         self.progress.setValue(controller.quiz.answered_count)
         self.answers_label.setText(f"{controller.quiz.answered_count} of {controller.quiz.total} questions answered · Answers saved in memory")
         self.quiz_card.setEnabled(session.running)
+        if self.browser is not None:
+            self.browser.setEnabled(session.running)
+            if session.ended:
+                self.browser.stop()
+                self.browser.shutdown()
         reasons = session.pause_reasons
         if "monitoring" in reasons:
             message = "PAUSED · Monitoring unavailable. The exam timer is stopped."
@@ -694,7 +1112,9 @@ class MainWindow(QMainWindow):
         if session.recovery_pin_required and "monitoring" in reasons:
             message += " Restore monitoring, then enter the proctor PIN."
         if self._diagnostic_reading:
-            message = ("DEBUG / UNVALIDATED · Read the question and options naturally until the completion beep. "
+            panel = self.calibration_widget.diagnostic_workflow
+            message = (source_text(panel.validation_status) if panel.screen_region_active else
+                       "DEBUG / UNVALIDATED · Read the question and options naturally until the completion beep. "
                        "No exam is running; these predictions do not create review events.")
         self.session_banner.setText(message)
         self.pause_button.setText("Resume with PIN…" if reasons & {"proctor", "recovery_pin"} else "Proctor pause…")
@@ -726,8 +1146,9 @@ class MainWindow(QMainWindow):
                       "—" if security_event else f'{event["duration_seconds"]:.2f}s', "N/A" if confidence is None else
                       f"{confidence:.0%}" + ("" if self.camera_mode else " (mock)")]
             for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setToolTip(str(value))
+                item = QTableWidgetItem(translate_text(value))
+                item.setData(Qt.ItemDataRole.UserRole, value)
+                item.setToolTip(translate_text(str(value)))
                 if event["state"] != "closed":
                     item.setBackground(QColor("#fff6de"))
                 self.event_table.setItem(row, column, item)
@@ -743,9 +1164,12 @@ class MainWindow(QMainWindow):
             recovery_text = ("Monitoring stopped. Protection released. Normal Windows interaction is restored."
                              if summary["blocking_enabled"] else
                              "Monitoring stopped. Protection interface released. No Windows restrictions were installed.")
+            result_text = ("External web exam · Submission and score are managed by the exam website.\n"
+                           if self.external_exam else
+                           f"Score: {summary['score']} / {summary['total_questions']}\n"
+                           f"Answered: {summary['answered']} questions   •   ")
             self.summary_text.setText(
-                f"Score: {summary['score']} / {summary['total_questions']}\n"
-                f"Answered: {summary['answered']} questions   •   Active exam time: {summary['elapsed_seconds']:.1f}s\n"
+                result_text + f"Active exam time: {summary['elapsed_seconds']:.1f}s\n"
                 f"Review events: {summary['event_count']}   •   End reason: {summary['end_reason']}\n\n"
                 f"{recovery_text}")
             self.summary_events.setText("\n".join(
@@ -755,6 +1179,8 @@ class MainWindow(QMainWindow):
             path_text = f"Saved locally: {controller.store.path}\nsummary.json · events.jsonl · config.json"
             if controller.storage_error:
                 path_text = f"Evidence save error: {controller.storage_error}\nCheck files in {controller.store.path}"
+            if controller.report_status == "complete":
+                path_text += "\n" + controller.config.reporting.report_filename
             if self.camera_mode:
                 path_text += "\nCamera session · No continuous video recorded."
             else:
@@ -763,6 +1189,10 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.summary_page)
 
     def _emergency(self) -> None:
+        if not self.controller.session.started and self.controller.audio is not None:
+            # Setup now owns a microphone resource before any exam exists.
+            # Release it as well; ordinary setup refresh never restarts stopped input.
+            self.controller.audio.stop()
         if self.controller.session.started and not self.controller.session.ended:
             self.controller.emergency_end()
             self._refresh()
@@ -792,12 +1222,31 @@ class MainWindow(QMainWindow):
             if not self.controller.session.ended:
                 event.ignore()
                 return
+        if getattr(self.controller, "report_status", "disabled") == "running":
+            # Qt font/layout objects used by the PDF worker require the GUI
+            # application to remain alive. Restrictions are released first;
+            # this timer keeps the UI responsive until the report completes.
+            self.controller.protection.release("report_finishing")
+            self.controller.monitor.stop()
+            event.ignore()
+            if not self._report_close_pending:
+                self._report_close_pending = True
+                QTimer.singleShot(100, self._retry_report_close)
+            self._refresh_optional()
+            return
         self.shutdown_ui()
         event.accept()
+
+    def _retry_report_close(self):
+        self._report_close_pending = False
+        self.controller.poll_optional_workers()
+        self.close()
 
     def shutdown_ui(self) -> None:
         """Idempotent cleanup also used when Qt exits without closeEvent."""
         self.timer.stop()
+        if self.audio_check_widget is not None:
+            self.audio_check_widget.timer.stop()
         self._watchdog_stop.set()
         # Release immediately, before even the safe-mode watchdog thread join.
         self.controller.protection.release("window_closed")
@@ -805,4 +1254,8 @@ class MainWindow(QMainWindow):
             self._watchdog_thread.join(timeout=1)
         self.controller.monitor.stop()
         self.controller.protection.close()
+        if self.browser is not None:
+            self.browser.shutdown()
+        self.controller.close_optional_workers()
+        self.controller.close_remote(timeout=2.0)
 

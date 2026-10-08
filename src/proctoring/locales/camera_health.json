@@ -1,0 +1,32 @@
+{
+  "camera_health.unstarted": {
+    "en": "Camera has not started",
+    "ru": "Камера ещё не включена",
+    "kk": "Камера әлі қосылмаған"
+  },
+  "camera_health.webcam_open": {
+    "en": "Cannot open webcam {index} ({backend})",
+    "ru": "Не удалось открыть камеру {index} ({backend})",
+    "kk": "Камера {index} ашылмады ({backend})"
+  },
+  "camera_health.webcam_disconnected": {
+    "en": "Webcam disconnected or returned an empty frame",
+    "ru": "Камера отключена или вернула пустой кадр",
+    "kk": "Камера ажыратылған немесе бос кадр жіберді"
+  },
+  "camera_health.webcam_format": {
+    "en": "Webcam did not return a three-channel BGR frame",
+    "ru": "Камера не вернула трёхканальный кадр BGR",
+    "kk": "Камера үш арналы BGR кадрын жібермеді"
+  },
+  "camera_health.camera_restart": {
+    "en": "A stopped camera cannot be restarted; create a new session",
+    "ru": "Остановленную камеру нельзя перезапустить; создайте новый сеанс",
+    "kk": "Тоқтатылған камера қайта қосылмайды; жаңа сеанс жасаңыз"
+  },
+  "camera_health.backend": {
+    "en": "Unsupported camera backend: {backend}",
+    "ru": "Неподдерживаемый интерфейс камеры: {backend}",
+    "kk": "Камера интерфейсі қолдау таппайды: {backend}"
+  }
+}

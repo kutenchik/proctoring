@@ -33,6 +33,7 @@ class Box:
 
 @dataclass(frozen=True)
 class HeadPose:
+    # Face-transform Euler angles: positive pitch rotates the face down.
     yaw: float = 0.0
     pitch: float = 0.0
     roll: float = 0.0
@@ -71,6 +72,20 @@ class GazeDiagnostics:
 
 
 @dataclass(frozen=True)
+class EyeOverlay:
+    """Source-frame normalized landmarks for temporary visual inspection only.
+
+    These points do not establish iris visibility or affect gaze admission.
+    ``iris`` starts with its center, followed by the four ring landmarks.
+    Preview scaling/mirroring must not change these source coordinates.
+    """
+
+    corners: tuple[tuple[float, float], ...]
+    lids: tuple[tuple[float, float], ...]
+    iris: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True)
 class FaceMeasurement:
     face_present: bool
     box: Box | None = None
@@ -82,6 +97,13 @@ class FaceMeasurement:
     # Dimensions of the original frame supplied to FaceAnalyzer, not a resized
     # preview, requested camera mode, or YOLO tensor.
     frame_size: tuple[int, int] | None = None
+    # Ephemeral developer-preview geometry; numerical exports omit these.
+    left_eye_overlay: EyeOverlay | None = None
+    right_eye_overlay: EyeOverlay | None = None
+    # Optional shape-consistency and appearance heuristics; never gaze evidence.
+    identity_points: tuple[tuple[float, float, float], ...] = ()
+    detected_face_count: int = 0
+    ear_regions: tuple[Box, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +125,14 @@ class VisionResult:
     frame: Any = field(default=None, repr=False, compare=False)
     yolo_latency_ms: float = 0.0
     face_latency_ms: float = 0.0
+    # Independent posture cue, not an eye classification or proof of misconduct.
+    # Kept separate so gaze_direction can honestly remain UNKNOWN with occlusion.
+    head_down: bool = False
+    identity_suspected: bool = False
+    identity_distance: float | None = None
+    identity_status: str = "Identity comparison disabled"
+    earphone_suspected: bool = False
+    earphone_status: str = "Ear-adjacent appearance heuristic disabled"
 
 
 @dataclass(frozen=True)

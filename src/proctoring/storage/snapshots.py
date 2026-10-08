@@ -13,6 +13,7 @@ class SnapshotWriter:
         self._closing = threading.Event()
         self._paths: dict[str, str] = {}
         self._errors: list[str] = []
+        self._results: list[dict] = []
         self._thread = threading.Thread(target=self._run, name="event-snapshots", daemon=True)
         self._thread.start()
 
@@ -36,6 +37,12 @@ class SnapshotWriter:
         with self._lock:
             return list(self._errors)
 
+    def drain_results(self) -> list[dict]:
+        """Completion notices, published only after atomic JPEG replacement."""
+        with self._lock:
+            results, self._results = self._results, []
+            return results
+
     def _run(self) -> None:
         while not self._closing.is_set() or not self._queue.empty():
             try:
@@ -54,9 +61,11 @@ class SnapshotWriter:
                 temporary.replace(target)
                 with self._lock:
                     self._paths[event_id] = f"snapshots/{target.name}"
+                    self._results.append({"event_id": event_id, "snapshot_path": self._paths[event_id]})
             except Exception as error:
                 with self._lock:
                     self._errors.append(f"{event_id}: {error}")
+                    self._results.append({"event_id": event_id, "snapshot_path": None})
             finally:
                 self._queue.task_done()
 

@@ -16,15 +16,19 @@ def test_vision_defaults_are_cpu_first_and_models_resolve_locally():
     assert config.vision.calibration_preparation_seconds == 2.
     assert config.vision.calibration_collection_seconds == 3.
     assert config.vision.calibration_debug is False
+    assert config.vision.calibration_pixel_uncertainty_multiplier == .8
     assert config.vision.face_fps > config.vision.yolo_fps
     assert config.public_dict()["vision"]["yolo_model"] == str(config.vision.yolo_model)
     assert config.vision.alignment.stable_seconds == .75
     assert config.vision.alignment.min_eye_width_pixels == 32
     assert config.vision.alignment.guide == (.18, .08, .82, .92)
+    assert config.vision.head_down_pitch_degrees == 14.
+    assert config.vision.head_down_max_yaw_degrees == 15.
+    assert config.vision.head_down_max_roll_degrees == 12.
 
 
 def test_alignment_overrides_merge_defaults_without_changing_gaze_gates(tmp_path):
-    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    text = DEFAULT_CONFIG.with_name("default.example.toml").read_text(encoding="utf-8")
     text = text[:text.index("[vision.alignment]")] + "[vision.alignment]\nstable_seconds = 1.0\n"
     path = tmp_path / "alignment.toml"
     path.write_text(text, encoding="utf-8")
@@ -43,7 +47,7 @@ def test_alignment_overrides_merge_defaults_without_changing_gaze_gates(tmp_path
     "unknown_setting = 1", "max_pitch_degrees = -1",
 ])
 def test_invalid_alignment_configuration_fails_before_startup(tmp_path, settings):
-    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    text = DEFAULT_CONFIG.with_name("default.example.toml").read_text(encoding="utf-8")
     path = tmp_path / "alignment.toml"
     path.write_text(text[:text.index("[vision.alignment]")] + "[vision.alignment]\n" + settings,
                     encoding="utf-8")
@@ -77,6 +81,10 @@ def test_invalid_alignment_configuration_fails_before_startup(tmp_path, settings
     ("calibration_collection_seconds = 3.0", "calibration_collection_seconds = 1.0"),
     ("calibration_eye_noise_floor = 0.01", "calibration_eye_noise_floor = 0.0"),
     ("calibration_min_signal_noise = 3.0", "calibration_min_signal_noise = 1.0"),
+    ("calibration_pixel_uncertainty_multiplier = 0.8", "calibration_pixel_uncertainty_multiplier = 0.0"),
+    ("calibration_pixel_uncertainty_multiplier = 0.8", "calibration_pixel_uncertainty_multiplier = -0.8"),
+    ("calibration_pixel_uncertainty_multiplier = 0.8", "calibration_pixel_uncertainty_multiplier = nan"),
+    ("calibration_pixel_uncertainty_multiplier = 0.8", "calibration_pixel_uncertainty_multiplier = true"),
     ("calibration_center_radius_fraction = 0.45", "calibration_center_radius_fraction = 0.6"),
     ("calibration_offscreen_radius_fraction = 0.30", "calibration_offscreen_radius_fraction = 0.7"),
     ("result_stale_seconds = 2.0", "result_stale_seconds = 0.2"),
@@ -85,9 +93,23 @@ def test_invalid_alignment_configuration_fails_before_startup(tmp_path, settings
     ("camera_index = 0", "camera_index = 0\nunknown_camera_setting = 1"),
 ])
 def test_invalid_vision_settings_fail_before_workers(tmp_path, old, new):
-    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    text = DEFAULT_CONFIG.with_name("default.example.toml").read_text(encoding="utf-8")
     assert old in text
     path = tmp_path / "config.toml"
     path.write_text(text.replace(old, new), encoding="utf-8")
     with pytest.raises(ValueError):
+        load_config(path)
+
+
+@pytest.mark.parametrize("key,default", [
+    ("head_down_pitch_degrees", "14.0"),
+    ("head_down_max_yaw_degrees", "15.0"),
+    ("head_down_max_roll_degrees", "12.0"),
+])
+@pytest.mark.parametrize("value", ["0", "-1", "90", "180", "nan", "inf", "true"])
+def test_invalid_head_down_pose_settings_fail_before_workers(tmp_path, key, default, value):
+    text = DEFAULT_CONFIG.with_name("default.example.toml").read_text(encoding="utf-8")
+    path = tmp_path / "pose.toml"
+    path.write_text(text.replace(f"{key} = {default}", f"{key} = {value}"), encoding="utf-8")
+    with pytest.raises(ValueError, match=key):
         load_config(path)

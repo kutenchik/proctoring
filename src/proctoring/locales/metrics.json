@@ -1,0 +1,107 @@
+{
+  "metrics.capture": {
+    "en": "Capture {capture} FPS",
+    "ru": "Камера: {capture} кадр/с",
+    "kk": "Камера: {capture} кадр/с"
+  },
+  "metrics.monitoring": {
+    "en": "Monitoring {monitoring} FPS",
+    "ru": "Наблюдение: {monitoring} кадр/с",
+    "kk": "Бақылау: {monitoring} кадр/с"
+  },
+  "metrics.yolo": {
+    "en": "YOLO {yolo} ms",
+    "ru": "YOLO: {yolo} мс",
+    "kk": "YOLO: {yolo} мс"
+  },
+  "metrics.face_latency": {
+    "en": "Face landmarks {face} ms",
+    "ru": "Ориентиры лица: {face} мс",
+    "kk": "Бет нүктелері: {face} мс"
+  },
+  "metrics.people": {
+    "en": "People: {people}",
+    "ru": "Людей: {people}",
+    "kk": "Адамдар: {people}"
+  },
+  "metrics.face": {
+    "en": "Face: {face}",
+    "ru": "Лицо: {face}",
+    "kk": "Бет: {face}"
+  },
+  "metrics.head": {
+    "en": "Head pose",
+    "ru": "Положение головы",
+    "kk": "Бас қалпы"
+  },
+  "metrics.yaw": {
+    "en": "yaw {yaw}°",
+    "ru": "поворот {yaw}°",
+    "kk": "бұрылу {yaw}°"
+  },
+  "metrics.pitch": {
+    "en": "pitch {pitch}°",
+    "ru": "наклон {pitch}°",
+    "kk": "еңкею {pitch}°"
+  },
+  "metrics.roll": {
+    "en": "roll {roll}°",
+    "ru": "крен {roll}°",
+    "kk": "қисаю {roll}°"
+  },
+  "metrics.already_started": {
+    "en": "This session has already started",
+    "ru": "Этот сеанс уже начат",
+    "kk": "Бұл сеанс басталған"
+  },
+  "metrics.camera_protection": {
+    "en": "Windows protection requires healthy camera monitoring and session calibration",
+    "ru": "Для защиты Windows необходимы работающее наблюдение с камеры и калибровка сеанса",
+    "kk": "Windows қорғанысы үшін камера бақылауы жұмыс істеуі және сеанс калибрленуі қажет"
+  },
+  "metrics.calibrate_first": {
+    "en": "Complete gaze calibration before starting",
+    "ru": "Перед началом завершите калибровку взгляда",
+    "kk": "Бастамас бұрын көзқарасты калибрлеуді аяқтаңыз"
+  },
+  "metrics.restore_mock": {
+    "en": "Restore synthetic monitoring before starting",
+    "ru": "Перед началом восстановите синтетическое наблюдение",
+    "kk": "Бастамас бұрын жасанды бақылауды қалпына келтіріңіз"
+  },
+  "metrics.invalid_timestamp": {
+    "en": "Invalid observation timestamp",
+    "ru": "Неверная метка времени наблюдения",
+    "kk": "Бақылаудың уақыт белгісі жарамсыз"
+  },
+  "metrics.future_timestamp": {
+    "en": "Observation timestamp is in the future",
+    "ru": "Метка времени наблюдения находится в будущем",
+    "kk": "Бақылаудың уақыт белгісі болашақта"
+  },
+  "metrics.debug_region": {
+    "en": "DEBUG / UNVALIDATED · Region: {region} · Point baseline: {baseline}",
+    "ru": "ОТЛАДКА / НЕ ПРОВЕРЕНО · Область: {region} · Точечный эталон: {baseline}",
+    "kk": "ЖӨНДЕУ / ТЕКСЕРІЛМЕГЕН · Аймақ: {region} · Нүктелік эталон: {baseline}"
+  },
+  "metrics.region": {
+    "en": "Region: {region}",
+    "ru": "Область: {region}",
+    "kk": "Аймақ: {region}"
+  },
+  "metrics.point": {
+    "en": "Point baseline: {baseline}",
+    "ru": "Точечный эталон: {baseline}",
+    "kk": "Нүктелік эталон: {baseline}"
+  },
+  "metrics.debug_no_measurement": {
+    "en": "DEBUG / UNVALIDATED · Region: UNKNOWN · waiting for a fresh validation measurement",
+    "ru": "ОТЛАДКА / НЕ ПРОВЕРЕНО · Область: НЕИЗВЕСТНО · ожидание свежего измерения для проверки",
+    "kk": "ЖӨНДЕУ / ТЕКСЕРІЛМЕГЕН · Аймақ: БЕЛГІСІЗ · жаңа тексеру өлшемі күтілуде"
+  },
+  "metrics.debug_reading": {
+    "en": "DEBUG / UNVALIDATED · Read the question and options naturally until the completion beep. No exam is running; these predictions do not create review events.",
+    "ru": "ОТЛАДКА / НЕ ПРОВЕРЕНО · Читайте вопрос и варианты ответа естественно до звукового сигнала. Экзамен не запущен; эти оценки не создают событий для проверки.",
+    "kk": "ЖӨНДЕУ / ТЕКСЕРІЛМЕГЕН · Аяқталу белгісіне дейін сұрақ пен жауаптарды әдеттегідей оқыңыз. Емтихан жүріп жатқан жоқ; бұл болжамдар тексеру оқиғаларын тудырмайды."
+  }
+}

@@ -12,3 +12,14 @@ models/*.task
 models/*.pt
 models/*.partial
 
+# Operator configuration and collected evidence stay on this machine.
+/config/default.toml
+/config/protected-demo.toml
+/gaze-failed-attempt*.json
+/glasses*.json
+/without-glasses*.json
+/brag-output/
+/output/
+/tmp/
+*.pdf
+

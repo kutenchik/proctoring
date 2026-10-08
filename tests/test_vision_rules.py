@@ -86,6 +86,20 @@ def test_face_present_with_closed_eyes_does_not_create_absence_or_gaze():
     assert to_observation(result).conditions == {}
 
 
+def test_unobservable_eyes_remain_unknown_while_phone_and_person_detectors_continue():
+    persons = [Box(.1, .1, .45, .9, .9), Box(.55, .1, .9, .9, .8)]
+    phones = [Box(.4, .3, .5, .5, .9)]
+    face = FaceMeasurement(True, box=Box(.2, .2, .4, .5), features=None)
+    result = build_result(10., persons, phones, face, Calibration(CONFIG), CONFIG)
+    assert result.monitoring_healthy and result.face_present
+    assert result.gaze_direction == GazeDirection.UNKNOWN
+    assert result.gaze_confidence is None
+    conditions = to_observation(result).conditions
+    assert EventType.PHONE_VISIBLE in conditions and EventType.SECOND_PERSON in conditions
+    assert EventType.FACE_ABSENT not in conditions
+    assert not any(event in conditions for event in (EventType.GAZE_LEFT, EventType.GAZE_RIGHT, EventType.GAZE_DOWN))
+
+
 def test_unhealthy_result_cannot_clear_events_or_generate_absence():
     with pytest.raises(ValueError, match="monitoring health"):
         to_observation(VisionResult(10., monitoring_healthy=False))

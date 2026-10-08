@@ -47,13 +47,14 @@ def test_per_eye_axis_and_original_frame_statistics_are_available():
 @pytest.mark.parametrize("separation,required", [(.0466, .0910), (.0730, .1096), (.0556, .0784)])
 def test_screenshot_numbers_alone_can_be_explained_by_distinct_causes(separation, required):
     """Same final gate can come from pixel or spread; screenshots cannot choose."""
-    pixel = Calibration(replace(VisionConfig(), calibration_samples=4))
+    pixel = Calibration(replace(VisionConfig(), calibration_samples=4,
+                                calibration_pixel_uncertainty_multiplier=3.0))
     spread = Calibration(replace(VisionConfig(), calibration_samples=4))
     for direction, vertical, start in ((GazeDirection.CENTER, .5, 1),
                                         (GazeDirection.DOWN, .5 + separation, 10)):
         samples(pixel, direction, [(.5, vertical)] * 4, start, required / 3)
-        jitter = required / 2.5
-        samples(spread, direction, [(.5 - jitter, vertical), (.5 + jitter, vertical)] * 2, start)
+        jitter = required / 2.0
+        samples(spread, direction, [(.5, vertical - jitter), (.5, vertical + jitter)] * 2, start)
     p = pixel.diagnostics["pairs"]["CENTER_DOWN"]
     s = spread.diagnostics["pairs"]["CENTER_DOWN"]
     for pair in (p, s):
@@ -63,7 +64,7 @@ def test_screenshot_numbers_alone_can_be_explained_by_distinct_causes(separation
     assert p["dominant_contributions"] == ["pixel_noise_floor"]
     assert s["dominant_contributions"] == ["spread"]
     assert p["threshold_contributions"]["constant_noise_floor"] == pytest.approx(.03)
-    assert s["axes"]["vertical"]["central_80_percent_intervals_overlap"] is False
+    assert s["axes"]["vertical"]["central_80_percent_intervals_overlap"] is True
 
 
 def test_unrelated_axis_can_drive_existing_radial_gate_without_being_hidden():
@@ -212,7 +213,7 @@ def test_discard_and_reset_remove_numerical_measurements_but_discard_keeps_fresh
 
 
 @pytest.mark.parametrize("floors", [[None] * 4, [.001, .02, None, .04], [.001] * 4, [.03, .02, .025, .04]])
-def test_split_threshold_terms_exactly_reproduce_unchanged_production_gate(floors):
+def test_split_threshold_terms_exactly_reproduce_configured_production_gate(floors):
     calibration = Calibration(replace(VisionConfig(), calibration_samples=4))
     timestamp = 0
     for direction, x in ((GazeDirection.CENTER, .5), (GazeDirection.LEFT, .43)):
@@ -221,6 +222,25 @@ def test_split_threshold_terms_exactly_reproduce_unchanged_production_gate(floor
             calibration.add_sample(direction, (x, .5 + (-.015 if index % 2 else .015), 0, 0),
                                    timestamp, 1, noise_floor=floor)
     pair = calibration.diagnostics["pairs"]["CENTER_LEFT"]
-    old_gate = max(3 * max(.01, max(value or 0 for value in floors)), 2.5 * .015)
-    assert pair["required_eye_separation"] == pytest.approx(old_gate)
-    assert max(value for value in pair["threshold_contributions"].values() if value is not None) == pytest.approx(old_gate)
+    gate = max(3 * .01, .8 * max(value or 0 for value in floors), 2.5 * .015)
+    assert pair["required_eye_separation"] == pytest.approx(gate)
+    assert max(value for value in pair["threshold_contributions"].values() if value is not None) == pytest.approx(gate)
+
+
+def test_down_fit_gate_uses_vertical_spread_without_unrelated_horizontal_noise():
+    calibration = Calibration(replace(VisionConfig(), calibration_samples=4))
+    for direction, vertical, start in ((GazeDirection.CENTER, .5, 1),
+                                       (GazeDirection.DOWN, .5463, 10)):
+        samples(calibration, direction, [(.45, vertical - .005), (.55, vertical + .005)] * 2,
+                start, 1 / 33.11)
+    pair = calibration.diagnostics["pairs"]["CENTER_DOWN"]
+    assert pair["eye_separation"] == pytest.approx(.0463)
+    assert pair["threshold_contributions"]["spread"] == pytest.approx(.01)
+    assert pair["required_eye_separation"] == pytest.approx(.03)
+    assert pair["dominant_contributions"] == ["constant_noise_floor"]
+    assert pair["metric_dimensions"] == 1
+    assert pair["unrelated_axis_spread_larger"]
+    assert not pair["axis_comparisons_are_diagnostic_only"]
+    assert pair["passed"]
+    # A passing pair still cannot bypass absent LEFT/RIGHT samples.
+    assert not calibration.fit()[0]

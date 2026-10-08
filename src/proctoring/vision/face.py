@@ -1,7 +1,8 @@
 """CPU MediaPipe landmarks and measured eye/head features (not gaze labels).
 
 Face Landmarker returns landmarks and a face transform. Our own geometry derives
-features; only the session Calibration object is allowed to assign gaze classes.
+features; session Calibration assigns eye-gaze classes. Observation mapping may
+use the independent head pose for a separate head-down posture review cue.
 """
 from __future__ import annotations
 
@@ -10,14 +11,16 @@ from pathlib import Path
 from typing import Sequence
 
 from .settings import VisionConfig
-from .types import Box, EyeDiagnostic, FaceMeasurement, GazeDiagnostics, HeadPose
+from .types import Box, EyeDiagnostic, EyeOverlay, FaceMeasurement, GazeDiagnostics, HeadPose
 
 
 def pose_from_matrix(matrix) -> HeadPose | None:
     """Approximate yaw/pitch/roll in degrees from the canonical face transform.
 
-    Axis signs are camera conventions rather than gaze directions. Per-session
-    calibration incorporates these signs and each student's neutral head pose.
+    MediaPipe's metric camera is right-handed, with +Y up and the camera looking
+    along -Z. Positive X rotation turns the face's +Z normal towards -Y: positive
+    pitch therefore means head-down. Yaw/roll are camera-axis Euler angles, not
+    eye-gaze labels. Iris classification still uses per-session references.
     """
     try:
         rotation = [[float(matrix[i][j]) for j in range(3)] for i in range(3)]
@@ -57,6 +60,42 @@ def _face_box(landmarks: Sequence) -> Box | None:
         return box if box.width > 0 and box.height > 0 else None
     except (IndexError, TypeError, ValueError):
         return None
+
+
+def identity_shape_points(landmarks: Sequence, frame_width: int, frame_height: int
+                          ) -> tuple[tuple[float, float, float], ...]:
+    """Stable face contour/nose/eye-corner anchors in consistent XYZ pixel units.
+
+    Iris centers and moving eyelids/lips are deliberately excluded. MediaPipe z
+    is scaled like normalized x, so it uses source width, not source height.
+    These coordinates are a shape descriptor, not a face-recognition embedding.
+    """
+    indices = (4, 5, 6, 168, 197, 195, 33, 133, 362, 263, 127, 356, 234, 454, 93, 323, 10, 151)
+    try:
+        points = []
+        for index in indices:
+            landmark = landmarks[index]
+            x, y = _xy(landmark)
+            z = float(landmark.z if hasattr(landmark, "z") else landmark[2])
+            points.append((x * frame_width, y * frame_height, z * frame_width))
+        return tuple(points) if all(math.isfinite(value) for point in points for value in point) else ()
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return ()
+
+
+def ear_adjacent_regions(landmarks: Sequence, box: Box) -> tuple[Box, ...]:
+    """Approximate cheek-contour-adjacent patches; Face Mesh has no ear canal."""
+    try:
+        left, right = sorted((_xy(landmarks[234]), _xy(landmarks[454])))
+        half_width, half_height = box.width * .12, box.height * .14
+        centers = ((left[0] - half_width * .35, left[1]),
+                   (right[0] + half_width * .35, right[1]))
+        if not all(math.isfinite(value) for point in centers for value in point):
+            return ()
+        return tuple(Box(x - half_width, y - half_height, x + half_width, y + half_height)
+                     for x, y in centers)
+    except (IndexError, TypeError, ValueError):
+        return ()
 
 
 def choose_primary_face(faces: Sequence[Sequence], min_area: float,
@@ -102,7 +141,7 @@ def _eye_measurement(landmarks: Sequence, indices: tuple[int, ...],
         vertical = .5 + ((center[0] - midpoint[0]) * vx + (center[1] - midpoint[1]) * vy) / width
         reason = ""
         if opening < .10:
-            reason = "eye closed or aperture too narrow"
+            reason = "low eyelid aperture; iris visibility unverified"
         elif opening > .75:
             reason = "implausible eyelid aperture"
         elif not (.02 <= horizontal <= .98 and .15 <= vertical <= .85):
@@ -110,6 +149,24 @@ def _eye_measurement(landmarks: Sequence, indices: tuple[int, ...],
         return EyeDiagnostic(horizontal, vertical, opening, not reason, reason, width)
     except (IndexError, TypeError, ValueError, OverflowError):
         return EyeDiagnostic(reason="malformed or missing eye landmarks")
+
+
+def _eye_overlay(landmarks: Sequence, corners: tuple[int, ...],
+                 lids: tuple[int, ...], iris: tuple[int, ...]) -> EyeOverlay | None:
+    """Retain finite source coordinates without interpreting them as visibility.
+
+    Keep geometry even when aperture/measurement checks reject the eye, so the
+    operator can inspect that rejection against its matching camera frame.
+    No rounding, clipping, or preview rescaling belongs in this extraction.
+    """
+    try:
+        groups = tuple(tuple(_xy(landmarks[index]) for index in indices)
+                       for indices in (corners, lids, iris))
+        if not all(math.isfinite(value) for group in groups for point in group for value in point):
+            return None
+        return EyeOverlay(*groups)
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def eye_head_measurement(landmarks: Sequence, pose: HeadPose | None,
@@ -125,7 +182,7 @@ def eye_head_measurement(landmarks: Sequence, pose: HeadPose | None,
     displacement uses the *corner axis*, not the moving eyelid midpoint: lids
     following a downward iris would otherwise cancel the signal. Eye width,
     rather than narrowing lid aperture, normalizes both iris coordinates.
-    Blink/occlusion rejection remains separate from that calculation. These
+    Aperture/geometry rejection remains separate from that calculation. These
     features are approximate measurements; session calibration assigns labels.
     """
     if frame_width <= 0 or frame_height <= 0:
@@ -197,7 +254,8 @@ class FaceAnalyzer:
         frame_size = (frame.shape[1], frame.shape[0])
         if chosen is None:
             self._previous_box = None
-            return FaceMeasurement(face_present=False, frame_size=frame_size)
+            return FaceMeasurement(face_present=False, frame_size=frame_size,
+                                   detected_face_count=len(result.face_landmarks))
         index, box = chosen
         self._previous_box = box
         landmarks = result.face_landmarks[index]
@@ -209,7 +267,14 @@ class FaceAnalyzer:
         overlay = tuple(_xy(landmarks[i]) for i in overlay_indices if i < len(landmarks))
         return FaceMeasurement(face_present=True, box=box, landmarks=overlay,
                                features=features, head_pose=pose, quality=quality,
-                               diagnostics=diagnostics, frame_size=frame_size)
+                               diagnostics=diagnostics, frame_size=frame_size,
+                               left_eye_overlay=_eye_overlay(landmarks, (362, 263), (386, 374),
+                                                             (473, 474, 475, 476, 477)),
+                               right_eye_overlay=_eye_overlay(landmarks, (33, 133), (159, 145),
+                                                              (468, 469, 470, 471, 472)),
+                               identity_points=identity_shape_points(landmarks, *frame_size),
+                               detected_face_count=len(result.face_landmarks),
+                               ear_regions=ear_adjacent_regions(landmarks, box))
 
     def close(self) -> None:
         if self._landmarker is not None:

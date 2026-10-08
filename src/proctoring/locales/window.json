@@ -1,0 +1,827 @@
+{
+  "window.language": {
+    "en": "Language",
+    "ru": "Язык",
+    "kk": "Тіл"
+  },
+  "common.ok": {
+    "en": "OK",
+    "ru": "ОК",
+    "kk": "Жарайды"
+  },
+  "common.cancel": {
+    "en": "Cancel",
+    "ru": "Отмена",
+    "kk": "Болдырмау"
+  },
+  "common.prepare": {
+    "en": "Prepare",
+    "ru": "Приготовиться",
+    "kk": "Дайындалу"
+  },
+  "common.submit_answers": {
+    "en": "Submit answers",
+    "ru": "Отправить ответы",
+    "kk": "Жауаптарды жіберу"
+  },
+  "window.time_remaining": {
+    "en": "Time remaining",
+    "ru": "Оставшееся время",
+    "kk": "Қалған уақыт"
+  },
+  "window.title_camera": {
+    "en": "Local Proctoring · Camera Demo",
+    "ru": "Локальный прокторинг · Камера",
+    "kk": "Жергілікті прокторинг · Камера"
+  },
+  "window.title_mock": {
+    "en": "Local Proctoring · Synthetic Demo",
+    "ru": "Локальный прокторинг · Симуляция",
+    "kk": "Жергілікті прокторинг · Симуляция"
+  },
+  "window.pin_title": {
+    "en": "Proctor authorization",
+    "ru": "Авторизация проктора",
+    "kk": "Прокторды растау"
+  },
+  "window.pin_help": {
+    "en": "Enter the proctor PIN to continue.",
+    "ru": "Чтобы продолжить, введите PIN проктора.",
+    "kk": "Жалғастыру үшін проктордың PIN кодын енгізіңіз."
+  },
+  "window.pin": {
+    "en": "Proctor PIN",
+    "ru": "PIN проктора",
+    "kk": "Проктордың PIN коды"
+  },
+  "window.pin_error": {
+    "en": "Incorrect PIN. Try again.",
+    "ru": "Неверный PIN. Попробуйте ещё раз.",
+    "kk": "PIN коды қате. Қайта енгізіңіз."
+  },
+  "window.pause_exam": {
+    "en": "Pause exam",
+    "ru": "Приостановить экзамен",
+    "kk": "Емтиханды кідірту"
+  },
+  "window.resume_exam": {
+    "en": "Resume exam",
+    "ru": "Продолжить экзамен",
+    "kk": "Емтиханды жалғастыру"
+  },
+  "window.end_session": {
+    "en": "End session",
+    "ru": "Завершить сеанс",
+    "kk": "Сеансты аяқтау"
+  },
+  "window.end_button": {
+    "en": "End session…",
+    "ru": "Завершить сеанс…",
+    "kk": "Сеансты аяқтау…"
+  },
+  "window.proctor_pause": {
+    "en": "Proctor pause…",
+    "ru": "Пауза проктора…",
+    "kk": "Проктор кідірісі…"
+  },
+  "window.resume_pin": {
+    "en": "Resume with PIN…",
+    "ru": "Продолжить с PIN…",
+    "kk": "PIN арқылы жалғастыру…"
+  },
+  "window.dev_heading": {
+    "en": "LOCAL PROCTORING / DEVELOPMENT DEMO",
+    "ru": "ЛОКАЛЬНЫЙ ПРОКТОРИНГ / ДЕМОНСТРАЦИЯ",
+    "kk": "ЖЕРГІЛІКТІ ПРОКТОРИНГ / ДЕМОНСТРАЦИЯ"
+  },
+  "window.demo_intro": {
+    "en": "A complete exam flow, ready to test.",
+    "ru": "Экзамен готов к демонстрации.",
+    "kk": "Емтихан барысы сынауға дайын."
+  },
+  "window.demo_stage": {
+    "en": "Stage 1–2 • Synthetic monitoring • Local evidence",
+    "ru": "Этапы 1–2 • Симуляция наблюдения • Локальные материалы",
+    "kk": "1–2 кезең • Бақылау симуляциясы • Жергілікті материалдар"
+  },
+  "window.synthetic_help": {
+    "en": "This build uses synthetic observations. No webcam is opened, no gaze calibration is performed, and Windows keyboard/window blocking is disabled.",
+    "ru": "В этом режиме используются синтетические наблюдения. Камера не включается, калибровка взгляда не проводится, блокировка клавиатуры и окон Windows отключена.",
+    "kk": "Бұл режимде жасанды бақылау деректері қолданылады. Камера қосылмайды, көзқарас калибрленбейді, Windows пернетақтасы мен терезелерін бұғаттау өшірілген."
+  },
+  "window.exam_setup": {
+    "en": "{description} · {minutes} minutes\n\nExercise the event thresholds using the monitoring controls. Review warnings never pause the exam. Monitoring failure pauses the quiz and timer; prolonged interruptions require the proctor PIN.",
+    "ru": "{description} · {minutes} мин\n\nПроверьте пороги событий с помощью элементов управления наблюдением. Предупреждения не приостанавливают экзамен. Сбой наблюдения приостанавливает тест и таймер; после длительного сбоя нужен PIN проктора.",
+    "kk": "{description} · {minutes} мин\n\nБақылау басқару элементтерімен оқиға шектерін тексеріңіз. Ескертулер емтиханды кідіртпейді. Бақылау істен шықса, тест пен таймер кідіреді; ұзақ үзілістен кейін проктордың PIN коды қажет."
+  },
+  "window.camera_launch_help": {
+    "en": "Launch without --synthetic to use webcam monitoring and session calibration. Snapshots are configured but unavailable with synthetic observations.",
+    "ru": "Запустите без --synthetic для работы с камерой и калибровкой сеанса. Снимки настроены, но недоступны при синтетических наблюдениях.",
+    "kk": "Камерамен бақылау және сеансты калибрлеу үшін --synthetic параметрінсіз іске қосыңыз. Суреттер бапталған, бірақ жасанды бақылау режимінде қолжетімсіз."
+  },
+  "window.start_demo": {
+    "en": "Start demo exam",
+    "ru": "Начать демонстрационный экзамен",
+    "kk": "Демо емтиханды бастау"
+  },
+  "window.external_exam": {
+    "en": "External web exam",
+    "ru": "Внешний веб-экзамен",
+    "kk": "Сыртқы веб-емтихан"
+  },
+  "window.question_total": {
+    "en": "{total} multiple-choice questions",
+    "ru": "Вопросов с вариантами ответа: {total}",
+    "kk": "Жауап нұсқалары бар сұрақтар: {total}"
+  },
+  "window.external_privacy": {
+    "en": "Proctoring data stays local. The external exam website receives its own form submissions and network requests.",
+    "ru": "Данные прокторинга остаются на этом компьютере. Внешний сайт экзамена получает отправленные ему формы и сетевые запросы.",
+    "kk": "Прокторинг деректері осы компьютерде қалады. Сыртқы емтихан сайты өзіне жіберілген пішіндер мен желі сұрауларын алады."
+  },
+  "window.local_privacy": {
+    "en": "All session data stays on this computer.",
+    "ru": "Все данные сеанса остаются на этом компьютере.",
+    "kk": "Сеанс деректері осы компьютерде сақталады."
+  },
+  "window.camera_heading": {
+    "en": "LOCAL PROCTORING / CAMERA DEMO",
+    "ru": "ЛОКАЛЬНЫЙ ПРОКТОРИНГ / КАМЕРА",
+    "kk": "ЖЕРГІЛІКТІ ПРОКТОРИНГ / КАМЕРА"
+  },
+  "window.camera_prepare": {
+    "en": "Prepare your camera and calibrate your gaze",
+    "ru": "Настройте камеру и откалибруйте взгляд",
+    "kk": "Камераны реттеп, көзқарасыңызды калибрлеңіз"
+  },
+  "window.protection_will_start": {
+    "en": "Windows protection will activate when the calibrated exam starts.",
+    "ru": "Защита Windows включится при запуске экзамена после калибровки.",
+    "kk": "Windows қорғанысы калибрлеуден кейін емтихан басталғанда қосылады."
+  },
+  "window.protection_safe": {
+    "en": "Windows protection is disabled in safe mode.",
+    "ru": "Защита Windows отключена в безопасном режиме.",
+    "kk": "Қауіпсіз режимде Windows қорғанысы өшірілген."
+  },
+  "window.privacy_protection": {
+    "en": "{privacy} Windows protection is disabled in safe mode.",
+    "ru": "{privacy} Защита Windows отключена в безопасном режиме.",
+    "kk": "{privacy} Қауіпсіз режимде Windows қорғанысы өшірілген."
+  },
+  "window.privacy_protected": {
+    "en": "{privacy} Windows protection will activate when the calibrated exam starts.",
+    "ru": "{privacy} Защита Windows включится при запуске экзамена после калибровки.",
+    "kk": "{privacy} Windows қорғанысы калибрлеуден кейін емтихан басталғанда қосылады."
+  },
+  "window.exam_duration": {
+    "en": "{description} · {minutes} minutes",
+    "ru": "{description} · {minutes} мин",
+    "kk": "{description} · {minutes} мин"
+  },
+  "window.camera_instructions": {
+    "en": "Open the camera, sit comfortably with your face and eyes visible, then collect four gaze directions. Keep the camera and your seating position fixed after calibration.",
+    "ru": "Включите камеру, сядьте удобно так, чтобы были видны лицо и глаза, затем запишите четыре направления взгляда. После калибровки не перемещайте камеру и не меняйте положение.",
+    "kk": "Камераны қосып, бетіңіз бен көзіңіз көрінетіндей ыңғайлы отырыңыз, содан кейін төрт бағыттағы көзқарасты жинаңыз. Калибрлеуден кейін камера мен отыру қалпын өзгертпеңіз."
+  },
+  "window.open_camera": {
+    "en": "Open camera",
+    "ru": "Включить камеру",
+    "kk": "Камераны қосу"
+  },
+  "window.camera_not_started": {
+    "en": "Camera not started",
+    "ru": "Камера не включена",
+    "kk": "Камера қосылмаған"
+  },
+  "window.gaze_help": {
+    "en": "Eye gaze is an approximate estimate from iris landmarks and this session's samples. Head pose is shown separately. Poor calibration must be retried before starting.",
+    "ru": "Взгляд оценивается приблизительно по ориентирам радужки и образцам этого сеанса. Положение головы показано отдельно. Неудачную калибровку нужно повторить до начала экзамена.",
+    "kk": "Көзқарас нұрлы қабық нүктелері мен осы сеанс үлгілері бойынша шамамен бағаланады. Бас қалпы бөлек көрсетіледі. Сәтсіз калибрлеуді емтиханға дейін қайталау қажет."
+  },
+  "window.start_exam": {
+    "en": "Start exam",
+    "ru": "Начать экзамен",
+    "kk": "Емтиханды бастау"
+  },
+  "window.camera_check": {
+    "en": "CAMERA CHECK",
+    "ru": "ПРОВЕРКА КАМЕРЫ",
+    "kk": "КАМЕРАНЫ ТЕКСЕРУ"
+  },
+  "window.waiting_monitoring": {
+    "en": "Waiting for monitoring",
+    "ru": "Ожидание наблюдения",
+    "kk": "Бақылауды күту"
+  },
+  "window.overlay_legend": {
+    "en": "Person = green · Phone = amber · Primary face = dotted blue",
+    "ru": "Человек — зелёный · Телефон — янтарный · Основное лицо — синий пунктир",
+    "kk": "Адам — жасыл · Телефон — сары · Негізгі бет — көк үзік сызық"
+  },
+  "window.heading": {
+    "en": "LOCAL PROCTORING",
+    "ru": "ЛОКАЛЬНЫЙ ПРОКТОРИНГ",
+    "kk": "ЖЕРГІЛІКТІ ПРОКТОРИНГ"
+  },
+  "window.exam_title": {
+    "en": "Demo examination",
+    "ru": "Демонстрационный экзамен",
+    "kk": "Демо емтихан"
+  },
+  "window.pause_calibration": {
+    "en": "Pause calibration",
+    "ru": "Приостановить калибровку",
+    "kk": "Калибрлеуді кідірту"
+  },
+  "window.retry_target": {
+    "en": "Retry this target",
+    "ru": "Повторить эту цель",
+    "kk": "Осы нысананы қайталау"
+  },
+  "window.cancel_calibration": {
+    "en": "Cancel calibration",
+    "ru": "Отменить калибровку",
+    "kk": "Калибрлеуден бас тарту"
+  },
+  "window.previous": {
+    "en": "← Previous",
+    "ru": "← Назад",
+    "kk": "← Алдыңғы"
+  },
+  "window.next": {
+    "en": "Next →",
+    "ru": "Далее →",
+    "kk": "Келесі →"
+  },
+  "window.live": {
+    "en": "LIVE MONITORING",
+    "ru": "НАБЛЮДЕНИЕ В РЕАЛЬНОМ ВРЕМЕНИ",
+    "kk": "НАҚТЫ УАҚЫТТАҒЫ БАҚЫЛАУ"
+  },
+  "window.mock_monitor": {
+    "en": "MONITORING / SYNTHETIC INPUT",
+    "ru": "НАБЛЮДЕНИЕ / СИНТЕТИЧЕСКИЕ ДАННЫЕ",
+    "kk": "БАҚЫЛАУ / ЖАСАНДЫ ДЕРЕКТЕР"
+  },
+  "window.no_camera": {
+    "en": "No webcam connected\nSynthetic observations only",
+    "ru": "Камера не подключена\nТолько синтетические наблюдения",
+    "kk": "Камера қосылмаған\nТек жасанды бақылау деректері"
+  },
+  "window.protection": {
+    "en": "Protection: {state}",
+    "ru": "Защита: {state}",
+    "kk": "Қорғаныс: {state}"
+  },
+  "window.no_video": {
+    "en": "No continuous video recording",
+    "ru": "Непрерывная видеозапись не ведётся",
+    "kk": "Үздіксіз бейне жазылмайды"
+  },
+  "window.no_snapshots": {
+    "en": "No video or snapshots captured",
+    "ru": "Видео и снимки не записываются",
+    "kk": "Бейне де, сурет те жазылмайды"
+  },
+  "window.retry_camera": {
+    "en": "Retry camera / monitoring",
+    "ru": "Перезапустить камеру / наблюдение",
+    "kk": "Камераны / бақылауды қайта қосу"
+  },
+  "window.synthetic_controls": {
+    "en": "Synthetic event controls",
+    "ru": "Управление синтетическими событиями",
+    "kk": "Жасанды оқиғаларды басқару"
+  },
+  "window.phone_visible": {
+    "en": "Phone visible",
+    "ru": "Телефон обнаружен",
+    "kk": "Телефон анықталды"
+  },
+  "window.phone_detected": {
+    "en": "Phone detected",
+    "ru": "Телефон обнаружен",
+    "kk": "Телефон анықталды"
+  },
+  "window.second_person": {
+    "en": "Second person",
+    "ru": "Второй человек",
+    "kk": "Бөгде адам"
+  },
+  "window.second_visible": {
+    "en": "Second person visible",
+    "ru": "Обнаружен второй человек",
+    "kk": "Бөгде адам анықталды"
+  },
+  "window.second_detected": {
+    "en": "Second person detected",
+    "ru": "Обнаружен второй человек",
+    "kk": "Бөгде адам анықталды"
+  },
+  "window.phone_raised": {
+    "en": "Phone raised",
+    "ru": "Телефон поднят",
+    "kk": "Телефон көтерілді"
+  },
+  "window.face_absent": {
+    "en": "Face absent",
+    "ru": "Лицо отсутствует",
+    "kk": "Бет көрінбейді"
+  },
+  "window.face_not_detected": {
+    "en": "Face not detected",
+    "ru": "Лицо не обнаружено",
+    "kk": "Бет анықталмады"
+  },
+  "window.gaze_down": {
+    "en": "Gaze down",
+    "ru": "Взгляд вниз",
+    "kk": "Төмен қарау"
+  },
+  "window.gaze_left": {
+    "en": "Gaze left",
+    "ru": "Взгляд влево",
+    "kk": "Солға қарау"
+  },
+  "window.gaze_right": {
+    "en": "Gaze right",
+    "ru": "Взгляд вправо",
+    "kk": "Оңға қарау"
+  },
+  "window.synthetic_threshold": {
+    "en": "{name} ({seconds}s)",
+    "ru": "{name} ({seconds} с)",
+    "kk": "{name} ({seconds} с)"
+  },
+  "window.failure": {
+    "en": "Monitoring failure",
+    "ru": "Сбой наблюдения",
+    "kk": "Бақылау ақауы"
+  },
+  "window.stall": {
+    "en": "Stop new observations",
+    "ru": "Остановить новые наблюдения",
+    "kk": "Жаңа бақылау деректерін тоқтату"
+  },
+  "window.review_zero": {
+    "en": "EVENT REVIEW · 0 events",
+    "ru": "ПРОВЕРКА СОБЫТИЙ · 0 событий",
+    "kk": "ОҚИҒАЛАРДЫ ҚАРАУ · 0 оқиға"
+  },
+  "window.review_heading": {
+    "en": "EVENT REVIEW · {count} event(s)",
+    "ru": "ПРОВЕРКА СОБЫТИЙ · {count}",
+    "kk": "ОҚИҒАЛАРДЫ ҚАРАУ · {count}"
+  },
+  "window.table_help": {
+    "en": "One row per sustained event · Detection quality",
+    "ru": "Одна строка на длительное событие · Качество обнаружения",
+    "kk": "Әр тұрақты оқиғаға бір жол · Анықтау сапасы"
+  },
+  "window.table_mock_help": {
+    "en": "One row per sustained event · Synthetic confidence",
+    "ru": "Одна строка на длительное событие · Синтетическая уверенность",
+    "kk": "Әр тұрақты оқиғаға бір жол · Жасанды сенімділік"
+  },
+  "window.started": {
+    "en": "Started (UTC)",
+    "ru": "Начало (UTC)",
+    "kk": "Басталуы (UTC)"
+  },
+  "window.review_event": {
+    "en": "Review event",
+    "ru": "Событие для проверки",
+    "kk": "Қаралатын оқиға"
+  },
+  "window.state": {
+    "en": "State",
+    "ru": "Состояние",
+    "kk": "Күйі"
+  },
+  "window.duration": {
+    "en": "Duration",
+    "ru": "Длительность",
+    "kk": "Ұзақтығы"
+  },
+  "window.confidence": {
+    "en": "Confidence",
+    "ru": "Уверенность",
+    "kk": "Сенімділік"
+  },
+  "window.session_done": {
+    "en": "SESSION COMPLETE",
+    "ru": "СЕАНС ЗАВЕРШЁН",
+    "kk": "СЕАНС АЯҚТАЛДЫ"
+  },
+  "window.summary_title": {
+    "en": "Exam & monitoring summary",
+    "ru": "Итоги экзамена и наблюдения",
+    "kk": "Емтихан және бақылау қорытындысы"
+  },
+  "window.close": {
+    "en": "Close application",
+    "ru": "Закрыть приложение",
+    "kk": "Қолданбаны жабу"
+  },
+  "window.experiment_blocks_exam": {
+    "en": "Screen-region experiment cannot start an exam. Leave experimental mode to use normal calibration.",
+    "ru": "В эксперименте с областями экрана нельзя начать экзамен. Выйдите из экспериментального режима для обычной калибровки.",
+    "kk": "Экран аймақтары тәжірибесінде емтиханды бастауға болмайды. Қалыпты калибрлеу үшін тәжірибе режимінен шығыңыз."
+  },
+  "window.validation_blocks_exam": {
+    "en": "Finish or cancel the diagnostic validation pass before starting an exam.",
+    "ru": "Завершите или отмените диагностическую проверку перед началом экзамена.",
+    "kk": "Емтиханды бастамас бұрын диагностикалық тексеруді аяқтаңыз немесе тоқтатыңыз."
+  },
+  "window.start_error": {
+    "en": "Could not start: {error}",
+    "ru": "Не удалось запустить: {error}",
+    "kk": "Іске қосылмады: {error}"
+  },
+  "window.browser_error": {
+    "en": "Browser error: {error}",
+    "ru": "Ошибка браузера: {error}",
+    "kk": "Браузер қатесі: {error}"
+  },
+  "window.open_error": {
+    "en": "Could not open monitoring: {error}",
+    "ru": "Не удалось включить наблюдение: {error}",
+    "kk": "Бақылау қосылмады: {error}"
+  },
+  "window.restart_error": {
+    "en": "Could not restart monitoring: {error}",
+    "ru": "Не удалось перезапустить наблюдение: {error}",
+    "kk": "Бақылау қайта қосылмады: {error}"
+  },
+  "window.capture_metrics": {
+    "en": "Capture {capture} FPS · Monitoring {monitoring} FPS",
+    "ru": "Камера: {capture} кадр/с · Наблюдение: {monitoring} кадр/с",
+    "kk": "Камера: {capture} кадр/с · Бақылау: {monitoring} кадр/с"
+  },
+  "window.vision_metrics": {
+    "en": "YOLO {yolo} ms · Face landmarks {face} ms",
+    "ru": "YOLO: {yolo} мс · Ориентиры лица: {face} мс",
+    "kk": "YOLO: {yolo} мс · Бет нүктелері: {face} мс"
+  },
+  "window.yolo_input": {
+    "en": "YOLO input: {size}",
+    "ru": "Вход YOLO: {size}",
+    "kk": "YOLO кірісі: {size}"
+  },
+  "window.source_size": {
+    "en": "Source: {width}×{height} px (requested {requested_width}×{requested_height})",
+    "ru": "Источник: {width}×{height} пикс. (запрошено {requested_width}×{requested_height})",
+    "kk": "Дереккөз: {width}×{height} пикс. (сұралғаны {requested_width}×{requested_height})"
+  },
+  "window.monitor_healthy": {
+    "en": "Monitoring healthy",
+    "ru": "Наблюдение работает",
+    "kk": "Бақылау жұмыс істеп тұр"
+  },
+  "window.monitor_unavailable": {
+    "en": "Monitoring unavailable · {reason}",
+    "ru": "Наблюдение недоступно · {reason}",
+    "kk": "Бақылау қолжетімсіз · {reason}"
+  },
+  "window.gaze_estimate": {
+    "en": "Eye-gaze estimate: {direction}",
+    "ru": "Оценка взгляда: {direction}",
+    "kk": "Көзқарас бағасы: {direction}"
+  },
+  "window.gaze_initial": {
+    "en": "Gaze: UNKNOWN",
+    "ru": "Взгляд: НЕИЗВЕСТНО",
+    "kk": "Көзқарас: БЕЛГІСІЗ"
+  },
+  "window.people_face": {
+    "en": "People: {people} · Face: {face}",
+    "ru": "Людей: {people} · Лицо: {face}",
+    "kk": "Адамдар: {people} · Бет: {face}"
+  },
+  "window.present": {
+    "en": "present",
+    "ru": "видно",
+    "kk": "көрінеді"
+  },
+  "window.absent": {
+    "en": "absent",
+    "ru": "не видно",
+    "kk": "көрінбейді"
+  },
+  "window.availability": {
+    "en": "Gaze availability reduced · {reason}",
+    "ru": "Низкая доступность оценки взгляда · {reason}",
+    "kk": "Көзқарасты бағалау қолжетімділігі төмен · {reason}"
+  },
+  "window.gaze_unreliable": {
+    "en": "no reliable calibrated eye-gaze estimate",
+    "ru": "нет надёжной откалиброванной оценки взгляда",
+    "kk": "сенімді калибрленген көзқарас бағасы жоқ"
+  },
+  "window.head_pose": {
+    "en": "Head pose · yaw {yaw}° · pitch {pitch}° · roll {roll}°",
+    "ru": "Положение головы · поворот {yaw}° · наклон {pitch}° · крен {roll}°",
+    "kk": "Бас қалпы · бұрылу {yaw}° · еңкею {pitch}° · қисаю {roll}°"
+  },
+  "window.question_number": {
+    "en": "QUESTION {index} / {total}",
+    "ru": "ВОПРОС {index} / {total}",
+    "kk": "СҰРАҚ {index} / {total}"
+  },
+  "window.option": {
+    "en": "{letter}.  {option}",
+    "ru": "{letter}.  {option}",
+    "kk": "{letter}.  {option}"
+  },
+  "window.answered": {
+    "en": "{answered} of {total} questions answered · Answers saved in memory",
+    "ru": "Отвечено на {answered} из {total} вопросов · Ответы сохранены в памяти",
+    "kk": "{total} сұрақтың {answered} сұрағына жауап берілді · Жауаптар жадта сақталған"
+  },
+  "window.paused_monitor": {
+    "en": "PAUSED · Monitoring unavailable. The exam timer is stopped.",
+    "ru": "ПАУЗА · Наблюдение недоступно. Таймер экзамена остановлен.",
+    "kk": "КІДІРІС · Бақылау қолжетімсіз. Емтихан таймері тоқтатылды."
+  },
+  "window.paused_proctor": {
+    "en": "PAUSED · Proctor pause. A valid PIN is required to resume.",
+    "ru": "ПАУЗА · Пауза проктора. Для продолжения нужен правильный PIN.",
+    "kk": "КІДІРІС · Проктор кідірісі. Жалғастыру үшін дұрыс PIN қажет."
+  },
+  "window.paused_recovery": {
+    "en": "PAUSED · Monitoring recovered after a prolonged interruption. Proctor PIN required.",
+    "ru": "ПАУЗА · Наблюдение восстановлено после длительного сбоя. Нужен PIN проктора.",
+    "kk": "КІДІРІС · Ұзақ үзілістен кейін бақылау қалпына келді. Проктордың PIN коды қажет."
+  },
+  "window.running": {
+    "en": "EXAM RUNNING · Review warnings do not pause the timer.",
+    "ru": "ЭКЗАМЕН ИДЁТ · Предупреждения не останавливают таймер.",
+    "kk": "ЕМТИХАН ЖҮРІП ЖАТЫР · Ескертулер таймерді тоқтатпайды."
+  },
+  "window.running_safe": {
+    "en": "EXAM RUNNING · Review warnings do not pause the timer. Windows blocking is disabled.",
+    "ru": "ЭКЗАМЕН ИДЁТ · Предупреждения не останавливают таймер. Блокировка Windows отключена.",
+    "kk": "ЕМТИХАН ЖҮРІП ЖАТЫР · Ескертулер таймерді тоқтатпайды. Windows бұғаттауы өшірілген."
+  },
+  "window.restore_then_pin": {
+    "en": "{message} Restore monitoring, then enter the proctor PIN.",
+    "ru": "{message} Восстановите наблюдение, затем введите PIN проктора.",
+    "kk": "{message} Бақылауды қалпына келтіріп, проктордың PIN кодын енгізіңіз."
+  },
+  "window.healthy_synthetic": {
+    "en": "Healthy synthetic monitoring",
+    "ru": "Синтетическое наблюдение работает",
+    "kk": "Жасанды бақылау жұмыс істеп тұр"
+  },
+  "window.unavailable_paused": {
+    "en": "Monitoring unavailable — exam paused",
+    "ru": "Наблюдение недоступно — экзамен приостановлен",
+    "kk": "Бақылау қолжетімсіз — емтихан кідіртілді"
+  },
+  "window.no_active": {
+    "en": "No active review events. Gaze uses this session's calibration.",
+    "ru": "Нет активных событий для проверки. Взгляд оценивается по калибровке этого сеанса.",
+    "kk": "Белсенді тексеру оқиғалары жоқ. Көзқарас осы сеанстың калибрлеуіне негізделеді."
+  },
+  "window.mock_events": {
+    "en": "{count} active review event(s). Clearing hysteresis: {seconds}s. Gaze controls simulate derived classifications; no landmark model is running.",
+    "ru": "Активных событий: {count}. Гистерезис завершения: {seconds} с. Элементы взгляда имитируют классификацию; модель ориентиров не запущена.",
+    "kk": "Белсенді оқиғалар: {count}. Аяқтау гистерезисі: {seconds} с. Көзқарас басқаруы жіктеуді имитациялайды; нүктелер моделі қосылмаған."
+  },
+  "window.recorded": {
+    "en": "Recorded",
+    "ru": "Записано",
+    "kk": "Жазылды"
+  },
+  "window.active": {
+    "en": "Active",
+    "ru": "Активно",
+    "kk": "Белсенді"
+  },
+  "window.clearing": {
+    "en": "Clearing",
+    "ru": "Ожидание завершения",
+    "kk": "Аяқталуы күтілуде"
+  },
+  "window.closed": {
+    "en": "Closed",
+    "ru": "Завершено",
+    "kk": "Аяқталды"
+  },
+  "window.candidate": {
+    "en": "Candidate",
+    "ru": "Ожидание порога",
+    "kk": "Шек күтілуде"
+  },
+  "window.na": {
+    "en": "N/A",
+    "ru": "Н/Д",
+    "kk": "Дерек жоқ"
+  },
+  "window.mock_confidence": {
+    "en": "{confidence} (mock)",
+    "ru": "{confidence} (симуляция)",
+    "kk": "{confidence} (симуляция)"
+  },
+  "window.write_error": {
+    "en": "Evidence write error: {error}",
+    "ru": "Ошибка записи материалов: {error}",
+    "kk": "Материалдарды жазу қатесі: {error}"
+  },
+  "window.local_evidence": {
+    "en": "Local evidence: {path}",
+    "ru": "Локальные материалы: {path}",
+    "kk": "Жергілікті материалдар: {path}"
+  },
+  "window.released": {
+    "en": "Monitoring stopped. Protection released. Normal Windows interaction is restored.",
+    "ru": "Наблюдение остановлено. Защита снята. Обычная работа с Windows восстановлена.",
+    "kk": "Бақылау тоқтатылды. Қорғаныс алынды. Windows жүйесімен қалыпты жұмыс қалпына келтірілді."
+  },
+  "window.released_safe": {
+    "en": "Monitoring stopped. Protection interface released. No Windows restrictions were installed.",
+    "ru": "Наблюдение остановлено. Интерфейс защиты освобождён. Ограничения Windows не устанавливались.",
+    "kk": "Бақылау тоқтатылды. Қорғаныс интерфейсі босатылды. Windows шектеулері орнатылмаған."
+  },
+  "window.external_result": {
+    "en": "External web exam · Submission and score are managed by the exam website.",
+    "ru": "Внешний веб-экзамен · Отправкой ответов и оценкой управляет сайт экзамена.",
+    "kk": "Сыртқы веб-емтихан · Жауаптарды жіберу мен бағалауды емтихан сайты басқарады."
+  },
+  "window.score": {
+    "en": "Score: {score} / {total}",
+    "ru": "Результат: {score} / {total}",
+    "kk": "Нәтиже: {score} / {total}"
+  },
+  "window.summary_answered": {
+    "en": "Answered: {answered} questions   •   Active exam time: {seconds}s",
+    "ru": "Ответов: {answered}   •   Активное время экзамена: {seconds} с",
+    "kk": "Жауап саны: {answered}   •   Емтиханның белсенді уақыты: {seconds} с"
+  },
+  "window.exam_time": {
+    "en": "Active exam time: {seconds}s",
+    "ru": "Активное время экзамена: {seconds} с",
+    "kk": "Емтиханның белсенді уақыты: {seconds} с"
+  },
+  "window.end_reason": {
+    "en": "Review events: {count}   •   End reason: {reason}",
+    "ru": "Событий для проверки: {count}   •   Причина завершения: {reason}",
+    "kk": "Тексеру оқиғалары: {count}   •   Аяқталу себебі: {reason}"
+  },
+  "window.summary_count": {
+    "en": "{event}: {count}",
+    "ru": "{event}: {count}",
+    "kk": "{event}: {count}"
+  },
+  "window.no_events": {
+    "en": "No review events recorded.",
+    "ru": "События для проверки не зарегистрированы.",
+    "kk": "Тексеру оқиғалары тіркелмеген."
+  },
+  "window.saved": {
+    "en": "Saved locally: {path}",
+    "ru": "Сохранено локально: {path}",
+    "kk": "Жергілікті сақталды: {path}"
+  },
+  "window.save_error": {
+    "en": "Evidence save error: {error}",
+    "ru": "Ошибка сохранения материалов: {error}",
+    "kk": "Материалдарды сақтау қатесі: {error}"
+  },
+  "window.check_files": {
+    "en": "Check files in {path}",
+    "ru": "Проверьте файлы в {path}",
+    "kk": "Файлдарды мына жерден тексеріңіз: {path}"
+  },
+  "window.camera_session": {
+    "en": "Camera session · No continuous video recorded.",
+    "ru": "Сеанс с камерой · Непрерывное видео не записывалось.",
+    "kk": "Камера сеансы · Үздіксіз бейне жазылмаған."
+  },
+  "window.mock_session": {
+    "en": "Synthetic session: no images or video were captured.",
+    "ru": "Синтетический сеанс: изображения и видео не записывались.",
+    "kk": "Жасанды сеанс: суреттер мен бейне жазылмаған."
+  },
+  "window.emergency_camera": {
+    "en": "Emergency recovery: camera monitoring stopped. Reopen the camera to continue.",
+    "ru": "Аварийное восстановление: наблюдение с камеры остановлено. Для продолжения включите камеру снова.",
+    "kk": "Төтенше қалпына келтіру: камера бақылауы тоқтатылды. Жалғастыру үшін камераны қайта қосыңыз."
+  },
+  "window.phone_warning": {
+    "en": "Phone raised — possible screen capture attempt.",
+    "ru": "Телефон поднят — возможная попытка сфотографировать экран.",
+    "kk": "Телефон көтерілді — экранды түсіру әрекеті болуы мүмкін."
+  },
+  "window.gaze_down_alert": {
+    "en": "Prolonged downward gaze",
+    "ru": "Длительный взгляд вниз",
+    "kk": "Ұзақ уақыт төмен қарау"
+  },
+  "window.gaze_left_alert": {
+    "en": "Prolonged gaze to the left",
+    "ru": "Длительный взгляд влево",
+    "kk": "Ұзақ уақыт солға қарау"
+  },
+  "window.gaze_right_alert": {
+    "en": "Prolonged gaze to the right",
+    "ru": "Длительный взгляд вправо",
+    "kk": "Ұзақ уақыт оңға қарау"
+  },
+  "window.gaze_away": {
+    "en": "Looking away from screen",
+    "ru": "Взгляд за пределы экрана",
+    "kk": "Экраннан тыс қарау"
+  },
+  "window.face_alert": {
+    "en": "Student’s face absent",
+    "ru": "Лицо студента не видно",
+    "kk": "Студенттің беті көрінбейді"
+  },
+  "window.CENTER": {
+    "en": "CENTER",
+    "ru": "ЦЕНТР",
+    "kk": "ОРТА"
+  },
+  "window.LEFT": {
+    "en": "LEFT",
+    "ru": "ВЛЕВО",
+    "kk": "СОЛҒА"
+  },
+  "window.RIGHT": {
+    "en": "RIGHT",
+    "ru": "ВПРАВО",
+    "kk": "ОҢҒА"
+  },
+  "window.DOWN": {
+    "en": "DOWN",
+    "ru": "ВНИЗ",
+    "kk": "ТӨМЕН"
+  },
+  "window.UNKNOWN": {
+    "en": "UNKNOWN",
+    "ru": "НЕИЗВЕСТНО",
+    "kk": "БЕЛГІСІЗ"
+  },
+  "window.READING": {
+    "en": "READING",
+    "ru": "ЧТЕНИЕ",
+    "kk": "ОҚУ"
+  },
+  "window.ACTIVE": {
+    "en": "ACTIVE",
+    "ru": "АКТИВНА",
+    "kk": "БЕЛСЕНДІ"
+  },
+  "window.INACTIVE": {
+    "en": "INACTIVE",
+    "ru": "ОТКЛЮЧЕНА",
+    "kk": "ӨШІРІЛГЕН"
+  },
+  "window.RECOVERY": {
+    "en": "RECOVERY",
+    "ru": "ВОССТАНОВЛЕНИЕ",
+    "kk": "ҚАЛПЫНА КЕЛТІРУ"
+  },
+  "window.completed": {
+    "en": "completed",
+    "ru": "завершён",
+    "kk": "аяқталды"
+  },
+  "window.proctor_ended": {
+    "en": "proctor_ended",
+    "ru": "завершён проктором",
+    "kk": "проктор аяқтады"
+  },
+  "window.emergency_shortcut": {
+    "en": "emergency_shortcut",
+    "ru": "аварийная комбинация клавиш",
+    "kk": "төтенше пернелер тіркесімі"
+  },
+  "window.timer_expired": {
+    "en": "timer_expired",
+    "ru": "время истекло",
+    "kk": "уақыт аяқталды"
+  },
+  "window.heartbeat_timeout": {
+    "en": "heartbeat_timeout",
+    "ru": "нет сигнала работоспособности",
+    "kk": "жұмыс сигналының уақыты өтті"
+  },
+  "window.application_exit": {
+    "en": "application_exit",
+    "ru": "закрытие приложения",
+    "kk": "қолданбадан шығу"
+  },
+  "window.browser_start_failed": {
+    "en": "browser_start_failed",
+    "ru": "ошибка запуска браузера",
+    "kk": "браузер іске қосылмады"
+  },
+  "window.unhandled_error": {
+    "en": "unhandled_error",
+    "ru": "необработанная ошибка",
+    "kk": "өңделмеген қате"
+  }
+}

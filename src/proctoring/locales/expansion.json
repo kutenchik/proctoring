@@ -1,0 +1,117 @@
+{
+  "identity.disabled": {"en": "Identity comparison disabled", "ru": "Сравнение лиц отключено", "kk": "Беттерді салыстыру өшірулі"},
+  "identity.camera_mode": {"en": "Selfie verification requires camera mode", "ru": "Для эталонного фото требуется режим камеры", "kk": "Эталон фото үшін камера режимі қажет"},
+  "identity.not_captured": {"en": "Reference face not captured", "ru": "Эталонное фото ещё не сделано", "kk": "Эталон бет суреті әлі түсірілмеген"},
+  "identity.waiting": {"en": "Waiting for a fresh reference face", "ru": "Ожидание свежего кадра лица", "kk": "Беттің жаңа кадры күтілуде"},
+  "identity.capture_ready": {"en": "Ready to capture reference face", "ru": "Можно сделать эталонное фото", "kk": "Эталон бет суретін түсіруге дайын"},
+  "identity.captured": {"en": "Reference captured; shape consistency is not identity authentication", "ru": "Фото получено; сходство формы лица не подтверждает личность", "kk": "Фото түсірілді; бет пішінінің ұқсастығы жеке басты растамайды"},
+  "identity.exam_wait": {"en": "Reference captured; identity comparisons start with the exam", "ru": "Фото получено; сравнение начнётся с экзаменом", "kk": "Фото түсірілді; салыстыру емтиханмен бірге басталады"},
+  "identity.unavailable": {"en": "Identity comparison unavailable", "ru": "Сравнение лиц недоступно", "kk": "Беттерді салыстыру қолжетімсіз"},
+  "identity.no_face": {"en": "No valid face for identity comparison", "ru": "Нет пригодного лица для сравнения", "kk": "Салыстыру үшін жарамды бет жоқ"},
+  "identity.one_face": {"en": "Exactly one face is required for identity comparison", "ru": "Для сравнения в кадре должно быть одно лицо", "kk": "Салыстыру үшін кадрда бір ғана бет болуы керек"},
+  "identity.no_pose": {"en": "Face pose unavailable for identity comparison", "ru": "Положение головы для сравнения недоступно", "kk": "Салыстыру үшін бас қалпы қолжетімсіз"},
+  "identity.frontal": {"en": "Face approximately forward for identity comparison", "ru": "Для сравнения смотрите примерно прямо", "kk": "Салыстыру үшін шамамен алға қараңыз"},
+  "identity.full_face": {"en": "Full face must remain in the source image", "ru": "Лицо должно полностью находиться в кадре", "kk": "Бет кадрда толық көрінуі керек"},
+  "identity.small": {"en": "Face too small for identity comparison", "ru": "Лицо слишком мало для сравнения", "kk": "Салыстыру үшін бет тым кішкентай"},
+  "identity.bad_region": {"en": "Face region invalid for identity comparison", "ru": "Область лица непригодна для сравнения", "kk": "Бет аймағы салыстыруға жарамсыз"},
+  "identity.bad_points": {"en": "Face shape landmarks unavailable or unreliable", "ru": "Ориентиры лица недоступны или ненадёжны", "kk": "Бет бағдарлары қолжетімсіз немесе сенімсіз"},
+  "identity.fresh": {"en": "Identity comparison requires a fresh frame", "ru": "Для сравнения нужен свежий кадр", "kk": "Салыстыру үшін жаңа кадр қажет"},
+  "identity.next": {"en": "Waiting for next identity comparison", "ru": "Ожидание следующего сравнения лиц", "kk": "Беттерді келесі салыстыру күтілуде"},
+  "identity.shape_unavailable": {"en": "Face shape comparison unavailable", "ru": "Сравнение формы лица недоступно", "kk": "Бет пішінін салыстыру қолжетімсіз"},
+  "identity.repeated_mismatch": {"en": "Face shape differs repeatedly; operator review required", "ru": "Повторное различие формы лица; нужна проверка оператором", "kk": "Бет пішіні қайталап сәйкес емес; оператор тексеруі қажет"},
+  "identity.pending": {"en": "Face shape mismatch pending repeat checks", "ru": "Различие формы лица; ожидаются повторные проверки", "kk": "Бет пішіні сәйкес емес; қайталап тексеру күтілуде"},
+  "identity.consistent": {"en": "Face shape consistent; identity not authenticated", "ru": "Форма лица сходна; личность не подтверждена", "kk": "Бет пішіні ұқсас; жеке басы расталмаған"},
+  "identity.capture_required": {"en": "A fresh, single, frontal face is required for the baseline photo", "ru": "Для эталона нужен свежий кадр с одним лицом анфас", "kk": "Эталон үшін бір бет алдан көрінетін жаңа кадр қажет"},
+  "identity.save_error": {"en": "Reference photo could not be saved: {error}", "ru": "Не удалось сохранить эталонное фото: {error}", "kk": "Эталон фото сақталмады: {error}"},
+  "audio.quiet": {"en": "Keep quiet for the first three seconds", "ru": "Соблюдайте тишину первые три секунды", "kk": "Алғашқы үш секунд тыныштық сақтаңыз"},
+  "audio.energy_only": {"en": "Energy only; speech is not verified", "ru": "Только уровень звука; речь не распознаётся", "kk": "Тек дыбыс деңгейі; сөйлеу анықталмайды"},
+  "audio.reset": {"en": "Audio overflow; resetting ambient baseline", "ru": "Переполнение аудиобуфера; повторная оценка фонового шума", "kk": "Аудиобуфер толды; фондық шу қайта бағаланады"},
+  "accessory.anomaly": {"en": "Ear-adjacent contrast anomaly; unvalidated accessory suspicion", "ru": "Контрастная аномалия возле уха; неподтверждённое подозрение на аксессуар", "kk": "Құлақ маңындағы контраст өзгеше; аксессуар туралы расталмаған болжам"},
+  "accessory.no_anomaly": {"en": "No persistent ear-adjacent appearance anomaly", "ru": "Устойчивых аномалий возле уха нет", "kk": "Құлақ маңында тұрақты көрініс ауытқуы жоқ"},
+  "accessory.disabled": {"en": "Ear-adjacent appearance heuristic disabled", "ru": "Проверка вида области уха отключена", "kk": "Құлақ маңының көрінісін тексеру өшірулі"},
+  "accessory.fresh": {"en": "Ear appearance requires a fresh frame", "ru": "Для проверки области уха нужен свежий кадр", "kk": "Құлақ аймағын тексеру үшін жаңа кадр қажет"},
+  "accessory.pose": {"en": "Ear appearance unavailable at this face pose", "ru": "При этом положении головы область уха не проверяется", "kk": "Бұл бас қалпында құлақ аймағы тексерілмейді"},
+  "accessory.patch": {"en": "Matching ear-adjacent source patch unavailable", "ru": "Соответствующий участок кадра возле уха недоступен", "kk": "Құлақ маңындағы сәйкес кадр бөлігі қолжетімсіз"},
+  "accessory.clipped": {"en": "Ear-adjacent patch clipped by camera frame", "ru": "Область возле уха обрезана границей кадра", "kk": "Құлақ маңындағы аймақ кадр шекарасында қиылған"},
+  "accessory.unavailable": {"en": "Ear-adjacent appearance check unavailable", "ru": "Проверка вида области уха недоступна", "kk": "Құлақ маңының көрінісін тексеру қолжетімсіз"},
+  "audio.disabled": {"en": "Audio: disabled", "ru": "Аудио: отключено", "kk": "Аудио: өшірулі"},
+  "audio.not_started": {"en": "Audio: not_started", "ru": "Аудио: не запущено", "kk": "Аудио: басталмаған"},
+  "audio.initializing": {"en": "Audio: initializing", "ru": "Аудио: подключение", "kk": "Аудио: қосылуда"},
+  "audio.calibrating": {"en": "Audio: calibrating", "ru": "Аудио: оценка фонового шума", "kk": "Аудио: фондық шуды бағалау"},
+  "audio.available": {"en": "Audio: available", "ru": "Аудио: доступно", "kk": "Аудио: қолжетімді"},
+  "audio.unavailable": {"en": "Audio: unavailable", "ru": "Аудио: недоступно", "kk": "Аудио: қолжетімсіз"},
+  "audio.stopped": {"en": "Audio: stopped", "ru": "Аудио: остановлено", "kk": "Аудио: тоқтатылды"},
+  "event.audio_activity": {"en": "Sustained audio activity — review required", "ru": "Длительная звуковая активность — требуется проверка", "kk": "Ұзақ дыбыстық белсенділік — тексеру қажет"},
+  "event.identity_consistency": {"en": "Face geometry changed — identity review required", "ru": "Геометрия лица изменилась — требуется проверка личности", "kk": "Бет геометриясы өзгерді — жеке басты тексеру қажет"},
+  "event.ear_appearance": {"en": "Ear-region appearance anomaly — accessory review required", "ru": "Необычный вид области уха — требуется проверка аксессуаров", "kk": "Құлақ аймағының көрінісі өзгеше — аксессуарларды тексеру қажет"},
+  "report.running": {
+    "en": "Generating audit report…", "ru": "Создание отчёта проверки…", "kk": "Тексеру есебі жасалуда…"
+  },
+  "report.closing": {
+    "en": "Generating audit report; close will finish automatically.",
+    "ru": "Создаётся отчёт; приложение закроется автоматически.",
+    "kk": "Есеп жасалуда; қолданба автоматты түрде жабылады."
+  },
+  "report.complete": {
+    "en": "Audit report saved with this session.", "ru": "Отчёт сохранён в папке сессии.", "kk": "Тексеру есебі сессия қалтасына сақталды."
+  },
+  "report.failed": {
+    "en": "Audit report unavailable; local session records remain saved.",
+    "ru": "Отчёт недоступен; локальные записи сессии сохранены.",
+    "kk": "Тексеру есебі қолжетімсіз; жергілікті сессия жазбалары сақталды."
+  },
+  "identity.notice": {
+    "en": "Optional face consistency check: a reference photo is saved with this session. Face geometry is a review heuristic, not verified identity.",
+    "ru": "Проверка постоянства лица: эталонное фото сохраняется в этой сессии. Геометрия лица — повод для проверки, а не подтверждение личности.",
+    "kk": "Беттің сәйкестігін тексеру: эталон фотосурет осы сессияда сақталады. Бет геометриясы жеке басты растау емес, тек тексеру белгісі."
+  },
+  "identity.required": {
+    "en": "Capture a valid reference face before proceeding to calibration.",
+    "ru": "Перед калибровкой сделайте пригодное эталонное фото лица.",
+    "kk": "Калибрлеуге өтпес бұрын беттің жарамды эталон суретін түсіріңіз."
+  },
+  "identity.open_camera": {
+    "en": "Open selfie camera", "ru": "Открыть камеру для фото", "kk": "Фото үшін камераны ашу"
+  },
+  "identity.capture": {
+    "en": "Take Baseline Photo", "ru": "Сделать эталонное фото", "kk": "Эталон фотосуретті түсіру"
+  },
+  "identity.prepare": {
+    "en": "Open the camera and capture a reference face before calibration.",
+    "ru": "Откройте камеру и сделайте эталонное фото лица перед калибровкой.",
+    "kk": "Калибрлеуден бұрын камераны ашып, беттің эталон суретін түсіріңіз."
+  },
+  "system.multimonitor": {
+    "en": "Multiple monitors detected. Please disconnect external displays before proceeding.",
+    "ru": "Обнаружено несколько мониторов. Отключите внешние экраны перед продолжением.",
+    "kk": "Бірнеше монитор анықталды. Жалғастырмас бұрын сыртқы экрандарды ажыратыңыз."
+  },
+  "system.display_unavailable": {
+    "en": "Display count unavailable; system check could not verify displays.",
+    "ru": "Количество экранов недоступно; проверка дисплеев не выполнена.",
+    "kk": "Экран саны қолжетімсіз; дисплейлер тексерілмеді."
+  },
+  "system.clipboard": {
+    "en": "Clipboard content cleared during exam", "ru": "Буфер обмена очищен во время экзамена", "kk": "Емтихан кезінде алмасу буфері тазартылды"
+  },
+  "system.vm": {
+    "en": "Virtual machine vendor heuristic matched; requires review",
+    "ru": "Признаки виртуальной машины по данным производителя; требуется проверка",
+    "kk": "Өндіруші деректері бойынша виртуалды машина белгісі; тексеру қажет"
+  },
+  "expansion.voice": {
+    "en": "Sustained audio activity — possible voice or noise; requires review.",
+    "ru": "Длительная звуковая активность — возможна речь или шум; требуется проверка.",
+    "kk": "Ұзақ дыбыстық белсенділік — сөйлеу немесе шу болуы мүмкін; тексеру қажет."
+  },
+  "expansion.earphone": {
+    "en": "Possible ear accessory — visual heuristic; requires review.",
+    "ru": "Возможный аксессуар у уха — визуальная гипотеза; требуется проверка.",
+    "kk": "Құлақ жанында аксессуар болуы мүмкін — визуалды болжам; тексеру қажет."
+  },
+  "expansion.identity": {
+    "en": "Face consistency mismatch — possible impersonation; requires review.",
+    "ru": "Изменение геометрии лица — возможна подмена участника; требуется проверка.",
+    "kk": "Бет геометриясы сәйкес емес — қатысушы ауысуы мүмкін; тексеру қажет."
+  }
+}

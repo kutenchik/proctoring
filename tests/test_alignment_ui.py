@@ -124,34 +124,27 @@ def test_position_motion_requires_another_stable_window(ui):
     assert widget.alignment_status.ready
 
 
-def test_collection_skips_bad_alignment_and_preserves_eye_rejections_with_fixed_deadline(ui):
+def test_substantial_motion_invalidates_current_samples_until_local_retry(ui):
     _, calibration, widget = ui
     aligned(ui)
     widget.begin_collection()
-    deadline = widget._collection_end
+    deadline = widget._window.deadline
     for stamp in (11.2, 11.6, 12., 12.4, 12.8):
         tick(ui, stamp)
     assert calibration.counts[GazeDirection.CENTER] == 1
     tick(ui, 13., box=Box(.1, .2, .4, .65))
-    assert calibration.counts[GazeDirection.CENTER] == 1
-    for stamp in (13.1, 13.5):
+    assert calibration.counts[GazeDirection.CENTER] == 0
+    assert widget._target_failed and not widget.collecting
+    assert widget._last_attempt["accepted"] == 1
+    assert "previous" in widget.status.text()
+    for stamp in (13.1, 13.5, 13.9):
         tick(ui, stamp)
-    assert calibration.counts[GazeDirection.CENTER] == 1
-    tick(ui, 13.9)
-    assert calibration.counts[GazeDirection.CENTER] == 2
-    tick(ui, 14., valid=False)
-    assert calibration.counts[GazeDirection.CENTER] == 2
-    assert widget._collection_end == deadline
-    reasons = calibration.diagnostics["targets"]["CENTER"]["rejection_reasons"]
-    assert reasons["alignment_face_not_contained"] == 1
-    assert reasons["alignment_hold_still"] == 2
-    assert reasons["blink_or_narrow_eye"] == 1
-    tick(ui, deadline)
-    assert not widget.collecting and not widget.preparing
+    assert calibration.counts[GazeDirection.CENTER] == 0
+    assert widget.collect_button.text() == "Retry this target"
+    widget.begin_collection()
+    assert widget.preparing
+    assert widget._window.deadline > deadline
     assert not calibration.ready
-    assert "2/3" in widget.status.text()
-    assert widget._last_attempt["accepted"] == 2
-    assert widget._last_attempt["rejection_reasons"]["alignment_face_not_contained"] == 1
 
 
 def test_alignment_diagnostics_stay_separate_from_gaze_fit_and_never_authorize_bad_fit(ui):

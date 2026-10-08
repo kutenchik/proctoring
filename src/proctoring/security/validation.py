@@ -14,7 +14,8 @@ import platform
 import sys
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parents[3])
 MANDATORY_CHECKS = frozenset({
     "normal_enable_disable", "emergency_shortcut", "main_graceful_exit",
     "heartbeat_loss", "main_crash", "repeated_enable_disable",
@@ -22,8 +23,22 @@ MANDATORY_CHECKS = frozenset({
 })
 
 
-def source_fingerprint(root: Path = ROOT) -> str:
-    """Include recovery code and its UI/controller integration, not credentials."""
+def source_fingerprint(root: Path | None = None) -> str:
+    """Bind recovery checks to exact shipped code, excluding editable secrets.
+
+    A one-file build has no external source tree. Hash the entire executable
+    instead, including its bundled helper, audit and UI integration. Never hash
+    the temporary extraction path: it changes at every launch. Do not cache the
+    digest; the audit's before/after comparison must detect a changed binary.
+    An explicit root retains the source-tree API used by development tests.
+    """
+    if root is None and getattr(sys, "frozen", False):
+        digest = hashlib.sha256(b"proctoring-frozen-executable-v1\0")
+        with Path(sys.executable).open("rb") as executable:
+            for chunk in iter(lambda: executable.read(4 * 1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    root = ROOT if root is None else root
     root = Path(root)
     paths = list((root / "src/proctoring/security").glob("*.py"))
     paths += [root / name for name in (
@@ -53,7 +68,9 @@ def require_recovery_validation(path: Path, max_age_hours: float = 24) -> dict:
     """Reject missing, stale, partial, or incompatible native audit reports."""
     if isinstance(max_age_hours, bool) or not math.isfinite(max_age_hours) or max_age_hours <= 0:
         raise ValueError("Recovery validation age must be finite and positive")
-    instruction = "Run scripts/validate_protection.py successfully before enabling protection"
+    instruction = ("Run this executable with --validate-protection successfully before enabling protection"
+                   if getattr(sys, "frozen", False)
+                   else "Run scripts/validate_protection.py successfully before enabling protection")
     try:
         report = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(report, dict):

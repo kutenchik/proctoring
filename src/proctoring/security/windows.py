@@ -16,6 +16,7 @@ import time
 from uuid import uuid4
 
 from .helper_process import OwnedHelperProcess
+from .launch import helper_command
 from .settings import ProtectionConfig
 
 
@@ -84,7 +85,7 @@ class WindowsProtection:
         if sys.platform != "win32":
             raise RuntimeError("Protected demo mode requires Windows")
         self._process = subprocess.Popen(
-            [sys.executable, "-m", "proctoring.security.helper", "--parent-pid", str(os.getpid())],
+            helper_command(os.getpid()),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW,

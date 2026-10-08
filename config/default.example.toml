@@ -1,0 +1,151 @@
+# Public example: copy to default.toml before editing.
+# Demo PIN 739261 is public; set your own proctor_pin before use.
+# Remote delivery is disabled and credentials are intentionally blank.
+[exam]
+duration_seconds = 600.0
+quiz_path = "../assets/quiz.json"
+# When non-empty, use an embedded browser instead of the native quiz.
+external_url = ""
+# Exact hostnames; an empty list uses external_url's hostname.
+allowed_domains = []
+
+[exam.registration]
+enabled = true
+require_group = true
+
+[exam.identity]
+# Optional geometric consistency check, not a verified biometric identity claim.
+selfie_verification_enabled = true
+impersonation_threshold = 0.40
+periodic_check_interval_seconds = 30.0
+
+[audio]
+# No audio recording; optional local energy monitoring only.
+enabled = false
+sample_rate = 16000
+voice_duration_threshold = 2.0
+energy_threshold = 0.15
+adaptive_calibration = true
+min_energy_threshold = 0.05
+max_energy_threshold = 0.40
+
+[reporting]
+generate_pdf_report = true
+send_pdf_to_telegram = false
+report_filename = "exam_integrity_report.pdf"
+
+[remote]
+# Delivery is opt-in; local session records always remain the primary record.
+enabled = false
+webhook_url = ""
+webhook_token = ""
+telegram_enabled = false
+telegram_bot_token = ""
+telegram_chat_id = ""
+max_queue_size = 50
+upload_timeout_seconds = 5.0
+
+[ui]
+# Interface language only; event identifiers and numerical exports stay unchanged.
+language = "en" # "en", "ru", or "kk"
+
+[events]
+phone_visible = 0.5
+second_person = 1.0
+phone_raised = 0.5
+gaze_deviation = 3.0
+face_absent = 3.0
+clearing_seconds = 0.75
+
+[monitoring]
+recovery_seconds = 15.0
+stale_seconds = 2.0
+synthetic_interval_ms = 100
+
+[storage]
+sessions_dir = "../sessions"
+snapshots_enabled = true
+
+[security]
+# Development/demo credential only. Legacy flag; opt-in is protection.enabled.
+proctor_pin = "739261"
+blocking_enabled = false
+
+[security.system_checks]
+block_multimonitor = true
+clipboard_guard_enabled = true
+vm_check_enabled = true
+
+[protection]
+enabled = false
+heartbeat_timeout_seconds = 5.0
+startup_timeout_seconds = 5.0
+foreground_poll_ms = 100
+validation_report = "../artifacts/protection-validation.json"
+validation_max_age_hours = 24.0
+
+[vision]
+camera_index = 0
+capture_width = 1280
+capture_height = 720
+capture_fps = 30
+camera_backend = "auto"
+yolo_model = "../models/yolo11n.onnx"
+face_model = "../models/face_landmarker.task"
+yolo_input_size = 416
+yolo_fps = 5.0
+face_fps = 12.0
+prefer_gpu = false
+cpu_threads = 2
+phone_confidence = 0.35
+person_confidence = 0.5
+person_min_area = 0.015
+person_min_height = 0.12
+phone_min_area = 0.0005
+nms_iou = 0.45
+face_min_area = 0.01
+# Runtime head-down posture assistance (positive pitch means downward).
+# Separate from calibration positioning and calibrated iris validity.
+head_down_pitch_degrees = 14.0
+head_down_max_yaw_degrees = 15.0
+head_down_max_roll_degrees = 12.0
+frame_stale_seconds = 2.0
+result_stale_seconds = 2.0
+heartbeat_stale_seconds = 5.0
+calibration_samples = 20
+calibration_max_spread = 0.12
+# Eye separation is checked against measured spread and pixel uncertainty.
+calibration_max_samples = 240
+calibration_preparation_seconds = 2.0
+calibration_collection_seconds = 3.0
+calibration_max_collection_seconds = 6.0
+calibration_debug = false
+calibration_eye_noise_floor = 0.01
+calibration_min_signal_noise = 3.0
+# Separate from the constant floor; source eye widths remain unscaled pixels.
+calibration_pixel_uncertainty_multiplier = 0.8
+calibration_offscreen_radius_fraction = 0.30
+calibration_center_radius_fraction = 0.45
+raised_face_margin = 0.6
+raised_person_top_fraction = 0.45
+
+[vision.accessories]
+# Experimental visual anomaly heuristic; not proof of earphone use.
+earphone_detection_enabled = false
+min_ear_yaw_trigger = 12.0
+
+# Positioning readiness only; these checks do not replace gaze calibration.
+[vision.alignment]
+guide = [0.18, 0.08, 0.82, 0.92]
+min_face_width_pixels = 140.0
+min_face_height_pixels = 160.0
+min_eye_width_pixels = 32.0
+min_quality = 0.45
+max_yaw_degrees = 15.0
+max_pitch_degrees = 15.0
+max_roll_degrees = 12.0
+stable_seconds = 0.75
+min_stable_samples = 3
+max_center_drift = 0.02
+max_scale_change = 0.10
+max_sample_gap_seconds = 0.5

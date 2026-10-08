@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 import math
 import sys
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ import pytest
 
 from proctoring.vision.face import FaceAnalyzer, choose_primary_face, eye_head_features, eye_head_measurement, pose_from_matrix
 from proctoring.vision.settings import VisionConfig
-from proctoring.vision.types import Box, HeadPose
+from proctoring.vision.types import Box, EyeOverlay, HeadPose
 
 
 def landmarks():
@@ -183,7 +183,7 @@ def test_blink_reports_measurements_and_reason_without_gaze_sample():
     assert diagnostics.right_eye.opening == pytest.approx(.005625)
     assert diagnostics.right_eye.vertical == pytest.approx(.5)
     assert diagnostics.right_eye.width_pixels == pytest.approx(128)
-    assert "aperture too narrow" in diagnostics.reason
+    assert "low eyelid aperture; iris visibility unverified" in diagnostics.reason
 
 
 def test_valid_eye_measurements_are_exposed_when_head_pose_missing():
@@ -264,7 +264,7 @@ def test_detector_keeps_face_present_when_gaze_geometry_is_unusable(monkeypatch)
     assert measurement.diagnostics is not None
     assert measurement.frame_size == (1280, 720)
     assert not measurement.diagnostics.valid
-    assert "aperture too narrow" in measurement.diagnostics.reason
+    assert "low eyelid aperture; iris visibility unverified" in measurement.diagnostics.reason
 
 
 def test_detector_fresh_frame_without_face_returns_absence(monkeypatch):
@@ -280,6 +280,8 @@ def test_detector_fresh_frame_without_face_returns_absence(monkeypatch):
     assert not measurement.face_present
     assert measurement.features is None
     assert measurement.frame_size == (1280, 720)
+    assert measurement.left_eye_overlay is None
+    assert measurement.right_eye_overlay is None
 
 
 def test_fractional_source_pixel_movement_survives_feature_calculation():
@@ -294,3 +296,98 @@ def test_fractional_source_pixel_movement_survives_feature_calculation():
     assert moved[1] - original[1] == pytest.approx(.125 / width)
     assert moved_diagnostics.left_eye.horizontal != original_diagnostics.left_eye.horizontal
     assert moved_diagnostics.right_eye.vertical != original_diagnostics.right_eye.vertical
+
+
+@pytest.mark.parametrize("opening, valid", [(0., False), (.03, False), (.099, False), (.101, True)])
+def test_downward_landmarks_do_not_bypass_unchanged_aperture_safeguard(opening, valid):
+    points = landmarks()
+    # Move the iris and lids downward while holding both corner axes fixed.
+    for upper, lower, iris, x in ((159, 145, 468, .35), (386, 374, 473, .65)):
+        half_aperture = opening * 128 / 720 / 2
+        points[upper], points[lower] = (x, .406 - half_aperture), (x, .406 + half_aperture)
+        points[iris] = (x, .406)
+    features, quality, diagnostics = eye_head_measurement(points, HeadPose(yaw=12, pitch=-6))
+    assert diagnostics.valid is valid
+    assert diagnostics.left_eye.opening == pytest.approx(opening)
+    assert diagnostics.right_eye.opening == pytest.approx(opening)
+    # Finite downward coordinates remain inspectable even when they are unusable.
+    assert diagnostics.left_eye.vertical > .5
+    assert diagnostics.right_eye.vertical > .5
+    if valid:
+        assert features[:2] == pytest.approx((.5, .53375))
+        assert quality == pytest.approx(opening / .22)
+    else:
+        assert features is None and quality == 0
+        assert diagnostics.left_eye.reason == "low eyelid aperture; iris visibility unverified"
+        assert diagnostics.right_eye.reason == "low eyelid aperture; iris visibility unverified"
+
+
+def _detect_points(monkeypatch, points):
+    result = SimpleNamespace(face_landmarks=[points], facial_transformation_matrixes=[
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+    ])
+    analyzer = FaceAnalyzer.__new__(FaceAnalyzer)
+    analyzer.config = VisionConfig()
+    analyzer._previous_box = None
+    analyzer._last_timestamp_ms = -1
+    analyzer._mp = SimpleNamespace(Image=lambda **kwargs: object(), ImageFormat=SimpleNamespace(SRGB=1))
+    analyzer._landmarker = SimpleNamespace(detect_for_video=lambda image, timestamp: result)
+    monkeypatch.setitem(sys.modules, "cv2", SimpleNamespace(cvtColor=lambda frame, code: frame, COLOR_BGR2RGB=1))
+    return analyzer.detect(SimpleNamespace(shape=(480, 640, 3)), 10.)
+
+
+def test_detector_retains_both_eyes_original_fractional_source_geometry(monkeypatch):
+    points = landmarks()
+    for iris, x in ((468, .35123), (473, .65123)):
+        points[iris:iris + 5] = [(x, .40567), (x + .01, .40567), (x, .40567 - .01),
+                                (x - .01, .40567), (x, .40567 + .01)]
+    measurement = _detect_points(monkeypatch, points)
+    assert measurement.frame_size == (640, 480)
+    for overlay, indices in ((measurement.left_eye_overlay, ((362, 263), (386, 374), (473, 474, 475, 476, 477))),
+                             (measurement.right_eye_overlay, ((33, 133), (159, 145), (468, 469, 470, 471, 472)))):
+        assert isinstance(overlay, EyeOverlay)
+        assert overlay.corners == tuple(points[i] for i in indices[0])
+        assert overlay.lids == tuple(points[i] for i in indices[1])
+        assert overlay.iris == tuple(points[i] for i in indices[2])
+        assert all(isinstance(value, float) for group in (overlay.corners, overlay.lids, overlay.iris)
+                   for point in group for value in point)
+        with pytest.raises(FrozenInstanceError):
+            overlay.iris = ()
+
+
+@pytest.mark.parametrize("gap", [0., .001, .01])
+def test_detector_retains_eye_inspection_geometry_when_aperture_rejects_gaze(monkeypatch, gap):
+    points = landmarks()
+    for upper, lower, iris, x in ((159, 145, 468, .35), (386, 374, 473, .65)):
+        points[upper], points[lower], points[iris] = (x, .406), (x, .406 + gap), (x, .406)
+    measurement = _detect_points(monkeypatch, points)
+    assert measurement.face_present
+    assert measurement.features is None
+    assert measurement.quality == 0
+    assert measurement.head_pose == HeadPose()
+    assert not measurement.diagnostics.valid
+    assert measurement.left_eye_overlay is not None
+    assert measurement.right_eye_overlay is not None
+    assert measurement.left_eye_overlay.iris[0] == points[473]
+    assert measurement.right_eye_overlay.lids == (points[159], points[145])
+
+
+@pytest.mark.parametrize("bad_point", [(math.nan, .4), (.4, math.inf), None])
+def test_bad_inspection_ring_point_does_not_change_gaze_admission(monkeypatch, bad_point):
+    points = landmarks()
+    points[469] = bad_point
+    measurement = _detect_points(monkeypatch, points)
+    assert measurement.right_eye_overlay is None
+    assert measurement.left_eye_overlay is not None
+    # The production feature calculation does not use ring points. Rendering
+    # missing inspection geometry must not introduce a new admission gate.
+    assert measurement.diagnostics.valid
+    assert measurement.features is not None
+
+
+def test_missing_iris_geometry_does_not_invent_an_overlay(monkeypatch):
+    measurement = _detect_points(monkeypatch, landmarks()[:468])
+    assert measurement.face_present
+    assert measurement.features is None
+    assert measurement.left_eye_overlay is None
+    assert measurement.right_eye_overlay is None

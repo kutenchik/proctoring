@@ -65,6 +65,11 @@ class AlignmentStatus:
     roll_degrees: float | None = None
     stable_samples: int = 0
     stable_elapsed_seconds: float = 0.0
+    # Position evidence is independent of the current eye/gaze measurement.
+    geometry_valid: bool = False
+    positioning_stable: bool = False
+    geometry_generation: int = 0
+    geometry_reset_reason: str | None = None
 
     @property
     def can_collect(self) -> bool:
@@ -75,8 +80,9 @@ class FaceAlignment:
     """Stateful positioning readiness driven exclusively by capture timestamps.
 
     Repeated UI polls cannot earn stability time. A fixed window anchor detects
-    cumulative motion, and a missing/invalid frame immediately clears readiness.
-    Head orientation is a positioning check, never a replacement gaze feature.
+    cumulative motion. Missing face geometry clears positioning history, whereas
+    invalid eyes only block eye-sample admission. Head orientation is a
+    positioning check, never a replacement gaze feature.
     """
 
     def __init__(self, config: AlignmentConfig | None = None, max_age: float = .75):
@@ -84,6 +90,8 @@ class FaceAlignment:
             raise ValueError("max_age must be finite and positive")
         self.config = config or AlignmentConfig()
         self.max_age = max_age
+        self._geometry_generation = -1
+        self._geometry_reset_reason: str | None = None
         self.reset()
 
     @property
@@ -92,8 +100,12 @@ class FaceAlignment:
 
     def reset(self) -> AlignmentStatus:
         self._last_timestamp: float | None = None
+        self._geometry_generation += 1
+        self._geometry_reset_reason = "reset"
         self._clear_stability()
-        self._status = AlignmentStatus(False, "no_face", "Center your face", 0.0, self.config.guide)
+        self._status = AlignmentStatus(False, "no_face", "Center your face", 0.0, self.config.guide,
+                                       geometry_generation=self._geometry_generation,
+                                       geometry_reset_reason=self._geometry_reset_reason)
         return self._status
 
     def _clear_stability(self):
@@ -103,9 +115,19 @@ class FaceAlignment:
         self._stable_last: float | None = None
         self._stable_samples = 0
 
-    def _fail(self, reason: str, message: str, values: dict) -> AlignmentStatus:
+    def _invalidate_geometry(self, reason: str):
+        # Repeated missing-frame UI polls represent one lost geometry interval,
+        # not a new baseline on every refresh.
+        if self._anchor is not None:
+            self._geometry_generation += 1
+            self._geometry_reset_reason = reason
         self._clear_stability()
-        self._status = AlignmentStatus(False, reason, message, 0.0, self.config.guide, **values)
+
+    def _fail(self, reason: str, message: str, values: dict, *, geometry_reason: str | None = None) -> AlignmentStatus:
+        self._invalidate_geometry(geometry_reason or reason)
+        self._status = AlignmentStatus(False, reason, message, 0.0, self.config.guide,
+                                       geometry_generation=self._geometry_generation,
+                                       geometry_reset_reason=self._geometry_reset_reason, **values)
         return self._status
 
     def update(self, result: VisionResult | None, now: float, healthy: bool) -> AlignmentStatus:
@@ -129,6 +151,7 @@ class FaceAlignment:
         if (not isinstance(size, (list, tuple)) or len(size) != 2
                 or not all(_finite_number(value) and value > 0 for value in size)):
             return self._fail("source_dimensions_missing", "Waiting for original camera dimensions", values)
+        size = tuple(size)
         values["frame_size"] = size
         box = face.box
         coordinates = (box.x1, box.y1, box.x2, box.y2)
@@ -143,17 +166,25 @@ class FaceAlignment:
         if diagnostics is not None:
             values.update(left_eye_width_pixels=diagnostics.left_eye.width_pixels,
                           right_eye_width_pixels=diagnostics.right_eye.width_pixels)
+        # Record the eye-admission failure, but still inspect this capture's
+        # independent face box and pose. A blink must not restart the head's
+        # positioning interval when that geometry remains observable and stable.
+        eye_failure = None
         if diagnostics is None or not diagnostics.left_eye.valid or not diagnostics.right_eye.valid:
-            return self._fail("eyes_not_visible", "Keep both eyes visible", values)
-        eye_widths = (diagnostics.left_eye.width_pixels, diagnostics.right_eye.width_pixels)
-        if any(not _finite_number(width) or width <= 0 for width in eye_widths):
-            return self._fail("eye_size_unavailable", "Keep both eyes visible", values)
+            eye_failure = ("eyes_not_visible", "Keep both eyes visible")
+        eye_widths = (() if diagnostics is None else
+                      (diagnostics.left_eye.width_pixels, diagnostics.right_eye.width_pixels))
+        if eye_failure is None and any(not _finite_number(width) or width <= 0 for width in eye_widths):
+            eye_failure = ("eye_size_unavailable", "Keep both eyes visible")
         if (values["face_width_pixels"] < self.config.min_face_width_pixels
-                or values["face_height_pixels"] < self.config.min_face_height_pixels
-                or min(eye_widths) < self.config.min_eye_width_pixels):
+                or values["face_height_pixels"] < self.config.min_face_height_pixels):
             return self._fail("face_too_small", "Move closer", values)
+        if eye_failure is None and min(eye_widths) < self.config.min_eye_width_pixels:
+            eye_failure = ("face_too_small", "Move closer")
         pose = face.head_pose
         if pose is None or not all(_finite_number(value) for value in (pose.yaw, pose.pitch, pose.roll)):
+            if eye_failure is not None:
+                return self._fail(*eye_failure, values, geometry_reason="head_pose_unavailable")
             return self._fail("head_pose_unavailable", "Face the screen naturally", values)
         values.update(yaw_degrees=pose.yaw, pitch_degrees=pose.pitch, roll_degrees=pose.roll)
         if (abs(pose.yaw) > self.config.max_yaw_degrees
@@ -163,13 +194,13 @@ class FaceAlignment:
         # The combined feature function also rejects missing head pose while
         # keeping both individual eye diagnostics valid. Check pose first so
         # that this case is not incorrectly described as hidden eyes.
-        if not diagnostics.valid and diagnostics.reason.startswith("eyes disagree"):
-            return self._fail("eye_measurements_disagree", "Hold still — eye measurements disagree", values)
-        if (not diagnostics.valid or face.features is None or len(face.features) != 4
+        if eye_failure is None and not diagnostics.valid and diagnostics.reason.startswith("eyes disagree"):
+            eye_failure = ("eye_measurements_disagree", "Hold still — eye measurements disagree")
+        if eye_failure is None and (not diagnostics.valid or face.features is None or len(face.features) != 4
                 or not all(_finite_number(value) for value in face.features)):
-            return self._fail("eye_measurements_invalid", "Hold still — eye measurements unavailable", values)
-        if not _finite_number(face.quality) or face.quality < self.config.min_quality:
-            return self._fail("eye_quality_low", "Keep both eyes visible", values)
+            eye_failure = ("eye_measurements_invalid", "Hold still — eye measurements unavailable")
+        if eye_failure is None and (not _finite_number(face.quality) or face.quality < self.config.min_quality):
+            eye_failure = ("eye_quality_low", "Keep both eyes visible")
 
         center_x, center_y = box.center
         moved = (self._anchor is not None
@@ -180,7 +211,8 @@ class FaceAlignment:
         gap = self._stable_last is not None and stamp - self._stable_last > self.config.max_sample_gap_seconds
         size_changed = self._anchor_frame_size is not None and size != self._anchor_frame_size
         if moved or gap or size_changed:
-            self._clear_stability()
+            self._invalidate_geometry("source_dimensions_changed" if size_changed else
+                                      "capture_gap" if gap else "face_moved")
         if unique:
             if self._anchor is None:
                 self._anchor = (center_x, center_y, box.width, box.height)
@@ -191,11 +223,16 @@ class FaceAlignment:
         elapsed = 0.0 if self._stable_since is None or self._stable_last is None else self._stable_last - self._stable_since
         progress = min(1.0, elapsed / self.config.stable_seconds,
                        self._stable_samples / self.config.min_stable_samples)
-        ready = elapsed >= self.config.stable_seconds and self._stable_samples >= self.config.min_stable_samples
-        self._status = AlignmentStatus(ready, "aligned" if ready else "hold_still",
-                                       "Face aligned" if ready else "Hold still", progress,
+        positioning_stable = (elapsed >= self.config.stable_seconds
+                              and self._stable_samples >= self.config.min_stable_samples)
+        ready = positioning_stable and eye_failure is None
+        reason, message = eye_failure or (("aligned", "Face aligned") if ready else ("hold_still", "Hold still"))
+        self._status = AlignmentStatus(ready, reason, message, progress,
                                        self.config.guide, stable_samples=self._stable_samples,
-                                       stable_elapsed_seconds=elapsed, **values)
+                                       stable_elapsed_seconds=elapsed, geometry_valid=True,
+                                       positioning_stable=positioning_stable,
+                                       geometry_generation=self._geometry_generation,
+                                       geometry_reset_reason=self._geometry_reset_reason, **values)
         return self._status
 
 

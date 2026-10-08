@@ -24,7 +24,7 @@ def test_safe_factory_never_starts_helper():
 
 
 def test_demo_config_explicitly_selects_windows_adapter():
-    config = load_config(DEFAULT_CONFIG.with_name("protected-demo.toml"))
+    config = load_config(DEFAULT_CONFIG.with_name("protected-demo.example.toml"))
     assert config.protection.enabled
     adapter = create_protection(config)
     assert isinstance(adapter, WindowsProtection)
@@ -264,7 +264,7 @@ def test_failed_owner_termination_never_claims_release_or_kills_launcher(monkeyp
     ('validation_report = "../artifacts/protection-validation.json"', 'validation_report = ""'),
 ])
 def test_protection_config_rejects_unsafe_values(tmp_path, old, new):
-    contents = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    contents = DEFAULT_CONFIG.with_name("default.example.toml").read_text(encoding="utf-8")
     assert old in contents
     target = tmp_path / "bad.toml"
     target.write_text(contents.replace(old, new), encoding="utf-8")

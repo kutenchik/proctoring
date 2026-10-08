@@ -10,6 +10,9 @@ class EventType(str, Enum):
     GAZE_LEFT = "gaze_left"
     GAZE_RIGHT = "gaze_right"
     FACE_ABSENT = "face_absent"
+    VOICE_DETECTED = "VOICE_DETECTED"
+    IMPERSONATION_SUSPECTED = "IMPERSONATION_SUSPECTED"
+    EARPHONE_SUSPECTED = "EARPHONE_SUSPECTED"
 
 
 EVENT_LABELS = {
@@ -20,6 +23,9 @@ EVENT_LABELS = {
     EventType.GAZE_LEFT: "Prolonged gaze to the left",
     EventType.GAZE_RIGHT: "Prolonged gaze to the right",
     EventType.FACE_ABSENT: "Student’s face absent",
+    EventType.VOICE_DETECTED: "Sustained audio activity — review required",
+    EventType.IMPERSONATION_SUSPECTED: "Face geometry changed — identity review required",
+    EventType.EARPHONE_SUSPECTED: "Ear-region appearance anomaly — accessory review required",
 }
 
 

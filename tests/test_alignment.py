@@ -172,8 +172,9 @@ def test_each_eye_must_reach_source_pixel_minimum(side):
 
 
 @pytest.mark.parametrize("side", ["left_eye", "right_eye"])
-def test_blink_or_narrow_eye_immediately_resets_stability(side):
+def test_blink_or_narrow_eye_blocks_sample_but_preserves_fresh_stable_geometry(side):
     evaluator = ready()
+    generation = evaluator.status.geometry_generation
     measurement = face()
     eye = replace(getattr(measurement.diagnostics, side), valid=False, reason="eye closed or aperture too narrow")
     diagnostics = replace(measurement.diagnostics, **{side: eye})
@@ -181,7 +182,104 @@ def test_blink_or_narrow_eye_immediately_resets_stability(side):
     assert status.reason == "eyes_not_visible"
     assert status.message == "Keep both eyes visible"
     assert not status.ready
-    assert evaluator.update(result(1.1), 1.1, True).stable_samples == 1
+    assert status.geometry_valid and status.positioning_stable
+    assert status.geometry_generation == generation
+    assert status.stable_samples == 4
+    resumed = evaluator.update(result(1.1), 1.1, True)
+    assert resumed.ready and resumed.stable_samples == 5
+    assert resumed.geometry_generation == generation
+
+
+@pytest.mark.parametrize("changes", [dict(features=None), dict(diagnostics=None),
+                                     dict(quality=.4), dict(features=(.5, math.nan, 0., 0.))])
+def test_invalid_eye_data_does_not_erase_observable_face_geometry(changes):
+    evaluator = ready()
+    before = evaluator.status
+    status = evaluator.update(result(1., face(**changes)), 1., True)
+    assert not status.ready
+    assert status.geometry_valid and status.positioning_stable
+    assert status.geometry_generation == before.geometry_generation
+    assert status.stable_samples == before.stable_samples + 1
+    assert evaluator.update(result(1.1), 1.1, True).ready
+
+
+def test_eye_invalid_geometry_can_earn_stability_but_never_admit_gaze():
+    evaluator = FaceAlignment()
+    invalid = face(features=None, quality=0., diagnostics=None)
+    for stamp in (0., .375, .75):
+        status = evaluator.update(result(stamp, invalid), stamp, True)
+        assert not status.ready
+    assert status.positioning_stable and status.geometry_valid
+    assert evaluator.update(result(.9), .9, True).ready
+
+
+def test_small_or_unknown_eye_width_still_blocks_sample_without_erasing_face_geometry():
+    for width in (31., None):
+        evaluator = ready()
+        measurement = face()
+        diagnostics = replace(measurement.diagnostics,
+                              left_eye=replace(measurement.diagnostics.left_eye, width_pixels=width))
+        status = evaluator.update(result(1., replace(measurement, diagnostics=diagnostics)), 1., True)
+        assert not status.ready
+        assert status.geometry_valid and status.positioning_stable
+        assert status.geometry_generation == 0
+        assert evaluator.update(result(1.1), 1.1, True).ready
+
+
+def test_movement_during_eye_invalidity_invalidates_geometry_generation():
+    evaluator = ready()
+    before = evaluator.status.geometry_generation
+    status = evaluator.update(result(1., face(box=Box(.33, .2, .73, .8), features=None)), 1., True)
+    assert not status.ready and not status.positioning_stable
+    assert status.geometry_valid
+    assert status.geometry_generation == before + 1
+    assert status.geometry_reset_reason == "face_moved"
+    assert status.stable_samples == 1
+
+
+@pytest.mark.parametrize("measurement, reason", [(face(box=None), "no_face"),
+                                                (face(head_pose=None, diagnostics=None), "head_pose_unavailable"),
+                                                (face(frame_size=None), "source_dimensions_missing"),
+                                                (face(box=Box(.1, .2, .5, .8)), "face_not_contained")])
+def test_missing_or_incompatible_geometry_invalidates_once_until_reacquired(measurement, reason):
+    evaluator = ready()
+    before = evaluator.status.geometry_generation
+    status = evaluator.update(result(1., measurement), 1., True)
+    assert not status.geometry_valid and not status.positioning_stable
+    assert status.geometry_generation == before + 1
+    assert status.geometry_reset_reason == reason
+    repeated = evaluator.update(result(1.1, measurement), 1.1, True)
+    assert repeated.geometry_generation == status.geometry_generation
+    resumed = evaluator.update(result(1.2), 1.2, True)
+    assert resumed.geometry_valid and not resumed.positioning_stable
+    assert resumed.stable_samples == 1
+
+
+def test_eye_invalid_capture_after_excessive_gap_cannot_preserve_stability():
+    evaluator = ready()
+    before = evaluator.status.geometry_generation
+    status = evaluator.update(result(1.3, face(features=None)), 1.3, True)
+    assert not status.ready and not status.positioning_stable
+    assert status.geometry_generation == before + 1
+    assert status.geometry_reset_reason == "capture_gap"
+
+
+def test_source_resolution_change_invalidates_even_when_eyes_unavailable():
+    evaluator = ready()
+    before = evaluator.status.geometry_generation
+    status = evaluator.update(result(1., face(frame_size=(1280, 720), diagnostics=None)), 1., True)
+    assert not status.ready and not status.positioning_stable
+    assert status.geometry_generation == before + 1
+    assert status.geometry_reset_reason == "source_dimensions_changed"
+
+
+def test_equivalent_source_size_list_does_not_trigger_geometry_reset():
+    evaluator = ready()
+    before = evaluator.status.geometry_generation
+    status = evaluator.update(result(1., face(frame_size=[640, 480])), 1., True)
+    assert status.ready
+    assert status.geometry_generation == before
+    assert status.frame_size == (640, 480)
 
 
 @pytest.mark.parametrize("changes, reason", [(dict(features=None), "eye_measurements_invalid"),

@@ -61,12 +61,31 @@ def phone_is_raised(phones: Iterable[Box], persons: Iterable[Box],
     return False
 
 
+def head_is_down(face: FaceMeasurement, config: VisionConfig) -> bool:
+    """Independent, current-frame posture cue even when irises are occluded.
+
+    Positive transform pitch is downward. Lateral/rolled and backwards-facing
+    poses remain unsupported. Neither eyelid aperture nor an eye-quality score
+    supplies head evidence; a finite face transform must actually be present.
+    The caller owns calibration readiness, frame freshness and sustained timing.
+    """
+    pose = face.head_pose
+    if not face.face_present or pose is None:
+        return False
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
+               and math.isfinite(value) for value in (pose.yaw, pose.pitch, pose.roll)):
+        return False
+    return (config.head_down_pitch_degrees < pose.pitch < 90.0
+            and abs(pose.yaw) <= config.head_down_max_yaw_degrees
+            and abs(pose.roll) <= config.head_down_max_roll_degrees)
+
+
 def build_result(timestamp: float, persons: Iterable[Box], phones: Iterable[Box],
                  face: FaceMeasurement, calibration: Calibration, config: VisionConfig,
                  frame=None, yolo_latency_ms: float = 0, face_latency_ms: float = 0) -> VisionResult:
     persons = filter_persons(persons, config)
     phones = filter_phones(phones, config)
-    direction, confidence = (calibration.classify(face.features) if face.face_present
+    direction, confidence = (calibration.classify(face.features, measurement=face) if face.face_present
                              else (GazeDirection.UNKNOWN, None))
     return VisionResult(
         timestamp=timestamp,
@@ -85,6 +104,7 @@ def build_result(timestamp: float, persons: Iterable[Box], phones: Iterable[Box]
         frame=frame,
         yolo_latency_ms=yolo_latency_ms,
         face_latency_ms=face_latency_ms,
+        head_down=calibration.ready and head_is_down(face, config),
     )
 
 
@@ -101,8 +121,17 @@ def to_observation(result: VisionResult) -> Observation:
         # Confidence of the second strongest person supports the count >= 2.
         scores = sorted((box.confidence for box in result.persons), reverse=True)
         conditions[EventType.SECOND_PERSON] = scores[1] if len(scores) >= 2 else None
+    if result.face_present and result.identity_suspected:
+        conditions[EventType.IMPERSONATION_SUSPECTED] = None
+    if result.face_present and result.earphone_suspected:
+        conditions[EventType.EARPHONE_SUSPECTED] = None
     if not result.face_present:
         conditions[EventType.FACE_ABSENT] = None
+    elif result.head_down:
+        # Share the DOWN duration/hysteresis accumulator without relabeling
+        # unobservable eyes or inventing a head-pose confidence probability.
+        conditions[EventType.GAZE_DOWN] = (result.gaze_confidence
+                                         if result.gaze_direction == GazeDirection.DOWN else None)
     elif result.gaze_direction in (GazeDirection.LEFT, GazeDirection.RIGHT, GazeDirection.DOWN):
         gaze_event = {
             GazeDirection.LEFT: EventType.GAZE_LEFT,

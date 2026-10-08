@@ -143,12 +143,13 @@ def test_all_coincident_references_stay_unknown_in_failed_production_and_debug()
 
 
 def test_pixel_gate_failure_cannot_be_bypassed_by_debug_down_extension():
-    calibration = collect(noise_floor=.031)
+    # A sufficiently small source eye still fails the configured .8 pixel gate.
+    calibration = collect(noise_floor=.12)
     assert not calibration.fit()[0]
     gate = calibration.diagnostics["pairs"]["CENTER_DOWN"]
     assert not gate["passed"]
     assert gate["dominant_contributions"] == ["pixel_noise_floor"]
-    assert gate["required_eye_separation"] == pytest.approx(.093)
+    assert gate["required_eye_separation"] == pytest.approx(.096)
     debug = DiagnosticValidation(calibration.export_snapshot(), CONFIG)
     assert debug.predict((.50, .51, 0., 0.)) == "DOWN"
     assert calibration.classify((.50, .51, 0., 0.)) == (GazeDirection.UNKNOWN, None)

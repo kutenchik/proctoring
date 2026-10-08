@@ -286,6 +286,108 @@ def test_same_core_predictions_as_production_for_a_successfully_fitted_snapshot(
     assert calibration.ready
 
 
+def guarded_attempt():
+    """Synthetic session with measured per-eye openness and a versioned policy."""
+    snapshot = attempt(True)
+    snapshot["classifier_policy"] = {
+        "version": "guarded_aperture_down_v1", "required_samples": 3,
+        "center_radius_fraction": CONFIG.calibration_center_radius_fraction,
+        "offscreen_radius_fraction": CONFIG.calibration_offscreen_radius_fraction,
+        "pixel_uncertainty_multiplier": .8,
+    }
+    for label, features in REFERENCES.items():
+        opening = .18 if label == "DOWN" else .32
+        snapshot["samples"][label] = [
+            {"accepted": True, "timestamp": 1. + index, "features": list(features),
+             "quality": 1., **guarded_metadata(features, opening)} for index in range(3)]
+    return snapshot
+
+
+def guarded_metadata(features, opening, *, valid=True):
+    return {"eyes": {side: {"horizontal": features[0], "vertical": features[1],
+                            "opening": opening, "width_pixels": 40., "valid": valid,
+                            "reason": "" if valid else "iris_unobservable"}
+                     for side in ("left", "right")}}
+
+
+def test_guarded_policy_is_frozen_and_applies_current_per_eye_metadata():
+    snapshot = guarded_attempt()
+    before = deepcopy(snapshot)
+    sequence = DiagnosticValidation(snapshot, CONFIG)
+    borderline = (.5, .524, 0., 0.)
+    sequence.start_target("CENTER", 20., 23.)
+    sequence.add_sample(borderline, 20., 1., metadata=guarded_metadata(borderline, .18))
+    sequence.add_sample(borderline, 20.1, 1., metadata=guarded_metadata(borderline, .10))
+    sequence.add_sample(borderline, 20.2, 1., metadata=guarded_metadata(borderline, .07))
+    sequence.add_sample(REFERENCES["CENTER"], 20.3, 1.,
+                        metadata=guarded_metadata(REFERENCES["CENTER"], .18))
+    sequence.add_sample(borderline, 20.4, 1.)  # No stale openness from the earlier rows.
+    sequence.add_sample(None, 20.5, 0., metadata=guarded_metadata(borderline, .07, valid=False),
+                        rejection_reason="iris_unobservable")
+    report = sequence.report
+    rows = report["samples"]["CENTER"]
+    assert [row["predicted_label"] for row in rows] == ["DOWN", "UNKNOWN", "UNKNOWN", "CENTER", "UNKNOWN", "UNKNOWN"]
+    assert report["targets"]["CENTER"]["correct_labels"] == 1
+    assert report["targets"]["CENTER"]["incorrect_labels"] == 1
+    assert report["targets"]["CENTER"]["unknown_measurements"] == 4
+    assert report["targets"]["CENTER"]["invalid_measurements"] >= 1
+    assert report["source_classifier_policy"] == snapshot["classifier_policy"]
+    assert report["guarded_aperture_enabled"]
+    assert snapshot == before
+    snapshot["classifier_policy"]["version"] = "modified_outside_validator"
+    assert sequence.report["source_classifier_policy"] == before["classifier_policy"]
+
+
+def test_legacy_snapshot_keeps_iris_only_predictions_with_current_eye_metadata():
+    snapshot = guarded_attempt()
+    snapshot.pop("classifier_policy")
+    sequence = DiagnosticValidation(snapshot, CONFIG)
+    sequence.start_target("CENTER", 20., 23.)
+    sequence.add_sample(REFERENCES["DOWN"], 20., 1.,
+                        metadata=guarded_metadata(REFERENCES["DOWN"], .07))
+    assert sequence.report["samples"]["CENTER"][0]["predicted_label"] == "DOWN"
+    assert not sequence.report["guarded_aperture_enabled"]
+    assert sequence.report["source_classifier_policy"] is None
+
+
+def test_versioned_guard_references_and_radii_use_frozen_collection_policy():
+    snapshot = guarded_attempt()
+    changed_live_config = replace(CONFIG, calibration_samples=30,
+                                  calibration_center_radius_fraction=.05,
+                                  calibration_offscreen_radius_fraction=.05)
+    original = DiagnosticValidation(snapshot, CONFIG)
+    changed = DiagnosticValidation(snapshot, changed_live_config)
+    assert changed.report["reference_centers"] == original.report["reference_centers"]
+    assert changed.report["reference_radii"] == original.report["reference_radii"]
+    borderline = (.5, .524, 0., 0.)
+    assert changed.predict(borderline, guarded_metadata(borderline, .18)) == "DOWN"
+
+
+def test_guarded_replay_keeps_existing_head_pose_veto():
+    sequence = DiagnosticValidation(guarded_attempt(), CONFIG)
+    unsupported_pose = (.5, .524, 1., 1.)
+    sequence.start_target("CENTER", 20., 23.)
+    sequence.add_sample(unsupported_pose, 20., 1., metadata=guarded_metadata(unsupported_pose, .18))
+    row = sequence.report["samples"]["CENTER"][0]
+    assert row["predicted_label"] == "UNKNOWN"
+    assert row["prediction_reason"] == "head_pose_outside_reference_coverage"
+
+
+def test_guarded_unknown_during_reading_is_abstention_not_a_correct_screen_label():
+    sequence = DiagnosticValidation(guarded_attempt(), CONFIG)
+    for index, label in enumerate(VALIDATION_TARGETS[:-1]):
+        collect(sequence, label, 20. + index * 4)
+    sequence.start_target("READING", 36., 39.)
+    sequence.add_sample(REFERENCES["CENTER"], 36.1, 1.,
+                        metadata=guarded_metadata(REFERENCES["CENTER"], .10))
+    report = sequence.report["targets"]["READING"]
+    assert report["correct_labels"] == 0
+    assert report["incorrect_labels"] == 0
+    assert report["unknown_measurements"] == 1
+    assert report["unknown_rate"] == 1.
+    assert report["offscreen_prediction_rate"] == 0.
+
+
 def test_missing_training_timestamp_cannot_silently_allow_reused_training_frames():
     snapshot = attempt()
     snapshot.pop("last_accepted_timestamp")
@@ -298,7 +400,9 @@ def test_missing_training_timestamp_cannot_silently_allow_reused_training_frames
 
 
 def test_real_rejected_calibration_export_stays_rejected_after_debug_collection():
-    calibration = Calibration(CONFIG)
+    # An explicitly conservative setting still creates a genuinely failed fit;
+    # diagnostic validation must never promote it to production readiness.
+    calibration = Calibration(replace(CONFIG, calibration_pixel_uncertainty_multiplier=3.))
     timestamp = 1.
     for direction in DIRECTIONS:
         for _ in range(3):

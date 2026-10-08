@@ -1,4 +1,5 @@
 # Verified on 64-bit Windows, Python 3.11.5. CPU runtime, tests, editable build.
+-r requirements-remote.lock
 absl-py==2.5.0
 cffi==2.1.1
 contourpy==1.3.3

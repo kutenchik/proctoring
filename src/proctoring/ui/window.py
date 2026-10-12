@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self.registration_widget = None
         self.registration_page = None
         self.audio_check_widget = None
+        self.devices_widget = None
         if not controller.registration_complete or (controller.config.identity.selfie_verification_enabled
                                                     and not controller.identity_ready):
             self._build_registration()
@@ -401,6 +402,11 @@ class MainWindow(QMainWindow):
         content.addWidget(self.open_camera_button)
         self.setup_health = label("Camera not started", "subtitle", True)
         content.addWidget(self.setup_health)
+        if hasattr(self.controller.monitor, 'select_camera'):
+            from .devices import DevicesWidget
+            self.devices_widget = DevicesWidget(self.controller)
+            content.addWidget(self.devices_widget)
+            self.devices_widget.camera_changing.connect(self._camera_device_changed)
         self.calibration_widget = CalibrationWidget(
             self.controller.monitor.calibration, self.controller.config.vision.calibration_samples,
             self.controller.config.vision.result_stale_seconds,
@@ -435,8 +441,11 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.setup_preview, 1)
         self.setup_metrics = label("Waiting for monitoring", "subtitle", True)
         preview_layout.addWidget(self.setup_metrics)
-        if self.controller.config.audio.enabled:
-            self.audio_check_widget = AudioCheckWidget(self.controller.audio, self.controller.config.audio)
+        if self.devices_widget is not None or self.controller.config.audio.enabled:
+            from dataclasses import replace
+            audio = self.devices_widget.audio if self.devices_widget else self.controller.audio
+            self.audio_check_widget = AudioCheckWidget(audio, replace(self.controller.config.audio, enabled=True),
+                                                       developer_mode=self.controller.config.vision.calibration_debug)
             preview_layout.addWidget(self.audio_check_widget)
         columns.addWidget(camera, 1)
         layout.addLayout(columns, 1)
@@ -828,6 +837,15 @@ class MainWindow(QMainWindow):
             self.monitor_error.setText(f"Could not restart monitoring: {error}")
         self._refresh_camera()
 
+    def _camera_device_changed(self):
+        if self.controller.session.started:
+            return
+        self.calibration_widget.diagnostic_workflow.cancel_validation()
+        self.calibration_widget.cancel_collection()
+        self.calibration_widget.reset()
+        self.setup_preview.set_frame(None, message='Switching camera')
+        self.start_button.setEnabled(False)
+
     def _retry_camera(self) -> None:
         if not self._require_registration():
             return
@@ -996,6 +1014,8 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _refresh_optional(self) -> None:
+        if self.devices_widget is not None:
+            self.devices_widget.update_session()
         if self.audio_check_widget is not None:
             started = self.controller.session.started
             self.audio_check_widget.set_exam_active(started)
@@ -1189,6 +1209,8 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.summary_page)
 
     def _emergency(self) -> None:
+        if self.devices_widget is not None and self.devices_widget.preview_only:
+            self.devices_widget.audio.stop(timeout=0)
         if not self.controller.session.started and self.controller.audio is not None:
             # Setup now owns a microphone resource before any exam exists.
             # Release it as well; ordinary setup refresh never restarts stopped input.
@@ -1247,6 +1269,8 @@ class MainWindow(QMainWindow):
         self.timer.stop()
         if self.audio_check_widget is not None:
             self.audio_check_widget.timer.stop()
+        if self.devices_widget is not None:
+            self.devices_widget.shutdown()
         self._watchdog_stop.set()
         # Release immediately, before even the safe-mode watchdog thread join.
         self.controller.protection.release("window_closed")

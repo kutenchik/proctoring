@@ -25,7 +25,7 @@ generated PDFs, session evidence, and brag output are also excluded from Git.
 3. [Run from source](#3-run-from-source)
 4. [Candidate and proctor workflow](#4-candidate-and-proctor-workflow)
 5. [Camera alignment and gaze calibration](#5-camera-alignment-and-gaze-calibration)
-6. [Microphone check](#6-microphone-check)
+6. [Microphone check](#6-devices-and-microphone-calibration)
 7. [Native quiz and external web exams](#7-native-quiz-and-external-web-exams)
 8. [Events, timing, and monitoring recovery](#8-events-timing-and-monitoring-recovery)
 9. [Windows protection and emergency recovery](#9-windows-protection-and-emergency-recovery)
@@ -288,39 +288,41 @@ from correct predictions. Debug/experimental predictions do not create misconduc
 events or authorize an exam. Human gaze performance remains camera/condition
 dependent and must be checked independently of passing regression tests.
 
-## 6. Microphone check
+## 6. Devices and microphone calibration
 
-Enable `[audio] enabled = true`. After registration, the setup page shows a live
-normalized RMS meter at up to 20 Hz, a threshold marker, the threshold source,
-ambient measurement, and a sensitivity slider. Audio processing stays off the UI.
+The camera setup page now has a **Devices** section: named camera and microphone
+selectors, **Refresh devices**, the existing live camera preview, and an audio meter.
+Camera names use Qt device IDs for capture; no mapping to OpenCV indices is assumed.
+The explicitly labelled configured OpenCV input remains available for older configs.
+Microphones show the input name, backend and current index; speakers are excluded.
 
-1. Click **Calibrate Mic** and remain quiet for **2.5 seconds**.
-2. The median background RMS is used to recommend
-   `max(ambient * 2.5, ambient + 0.08)`.
-3. Speak a few words at ordinary volume. The level must exceed the proposed
-   threshold for at least **0.15 seconds within eight seconds**.
-4. A successful rise shows **Microphone ready** and commits the session threshold.
+Choose the microphone, click **Calibrate microphone**, remain quiet for about
+**1.5 seconds**, then speak naturally for **6 seconds**. Progress and simple prompts
+are shown; the check has a **12-second** deadline. Successful calibration applies a
+fixed, bounded application-side gain to the samples consumed by the detector.
+The level meter and trigger both use processed normalized RMS. Normal setup hides
+numerical controls; calibration debug mode exposes input/processed RMS and gain.
 
-Baseline threshold limits are 0.05–0.40 normalized RMS. A recommended threshold
-above the maximum is reported as too noisy rather than silently accepted below
-the measured floor. High sensitivity lowers the trigger; Low raises it. The
-slider changes detection sensitivity, not Windows microphone gain. A manual
-change removes the ready indication until the setting is checked again.
+The gain targets speech RMS 0.15, is capped at 8×, reserves peak headroom, ramps
+smoothly, and never grows during silence. Silence, constant noise, insufficient
+speech-level variation and clipped input cannot report calibration success.
+A failed retry retains a valid same-device gain/threshold. This lightweight activity
+check does not establish that sound is speech, identify the speaker, or remove noise.
 
-The check is optional and does not block exam start. Without a committed adaptive
-or manual threshold, the legacy fallback learns ambient noise for three seconds
-and uses `max(ambient + energy_threshold, 3 * ambient)`; its configured increment
-is 0.15. A failed retry retains an earlier committed threshold, identified
-separately from the failed attempt's measurements.
+Switching cameras clears camera-dependent calibration and old results. Switching
+microphones clears only that input's calibration and buffers. Device switches are
+setup-only. Unavailable saved devices are shown explicitly. Device preferences use
+local Qt settings; gains/references are session-only, with numerical metadata in
+session records. Ambiguous duplicate microphone names must be reselected.
 
-No microphone/denied permissions/stale input is shown as unavailable and can be
-retried. Audio unavailability does not pause the camera or exam timer. On exam
-start, preflight samples are discarded; only fresh exam audio can accumulate the
-two-second audio event. RMS detects sustained **sound energy**, not speech content:
-music, a fan, and voices can cross the same threshold. No audio recording,
-transcription, storage, or upload is performed.
+A setup microphone test is available even with `audio.enabled = false`; this does
+**not** enable exam audio monitoring. With audio enabled, fresh exam samples use the
+same processing pipeline and existing audio-event timing. Microphone failure still
+does not pause the exam. The check is optional. No audio recordings are saved or
+uploaded, and neither Windows microphone volume nor website audio is modified.
 
-Detailed operation and hardware check: [AUDIO_CHECK.md](docs/AUDIO_CHECK.md).
+Full formulas, limitations and manual check: [AUDIO_CHECK.md](docs/AUDIO_CHECK.md).
+The published v0.4.0 EXE remains unchanged; this update is currently in source.
 
 ## 7. Native quiz and external web exams
 

@@ -78,3 +78,12 @@ def isolated_ui_language():
     i18n.set_language("en")
     yield
     i18n.set_language("en")
+
+
+@pytest.fixture(autouse=True)
+def isolated_device_preferences(monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    from proctoring.ui import devices
+    monkeypatch.setattr(devices, 'preferences', lambda: QSettings(
+        str(tmp_path / 'device-preferences.ini'), QSettings.Format.IniFormat))
+    monkeypatch.setattr(devices, 'scan_inputs', lambda: {'cameras': [], 'microphones': []})

@@ -1,0 +1,147 @@
+{
+  "devices.title": {
+    "en": "Devices",
+    "ru": "Устройства",
+    "kk": "Құрылғылар"
+  },
+  "devices.camera": {
+    "en": "Camera",
+    "ru": "Камера",
+    "kk": "Камера"
+  },
+  "devices.microphone": {
+    "en": "Microphone",
+    "ru": "Микрофон",
+    "kk": "Микрофон"
+  },
+  "devices.refresh": {
+    "en": "Refresh devices",
+    "ru": "Обновить устройства",
+    "kk": "Құрылғыларды жаңарту"
+  },
+  "devices.default_mic": {
+    "en": "System default microphone",
+    "ru": "Системный микрофон по умолчанию",
+    "kk": "Жүйелік әдепкі микрофон"
+  },
+  "devices.calibrate_mic": {
+    "en": "Calibrate microphone",
+    "ru": "Откалибровать микрофон",
+    "kk": "Микрофонды калибрлеу"
+  },
+  "devices.preview_only": {
+    "en": "Setup microphone test only. Exam audio monitoring is disabled in config.",
+    "ru": "Микрофон проверяется только при настройке. Аудиомониторинг экзамена выключен в конфиге.",
+    "kk": "Микрофон тек баптау кезінде тексеріледі. Емтихан аудиобақылауы өшірулі."
+  },
+  "devices.local": {
+    "en": "Audio stays local. Gain applies only to this application, not Windows or the exam website.",
+    "ru": "Аудио обрабатывается локально. Усиление действует только в приложении, не в Windows или на сайте экзамена.",
+    "kk": "Аудио жергілікті өңделеді. Күшейту тек осы қолданбада жұмыс істейді."
+  },
+  "devices.scanning": {
+    "en": "Finding input devices…",
+    "ru": "Поиск устройств ввода…",
+    "kk": "Кіріс құрылғыларын іздеу…"
+  },
+  "devices.timeout": {
+    "en": "Device enumeration is taking too long. Check device connections; restart if the driver remains stuck.",
+    "ru": "Поиск устройств затянулся. Проверьте подключение; если драйвер завис, перезапустите приложение.",
+    "kk": "Құрылғыларды іздеу ұзаққа созылды. Қосылымды тексеріңіз; драйвер жауап бермесе, қайта іске қосыңыз."
+  },
+  "devices.missing": {
+    "en": "Saved {device} unavailable — choose another device",
+    "ru": "Сохранённое устройство {device} недоступно — выберите другое",
+    "kk": "Сақталған {device} қолжетімсіз — басқа құрылғыны таңдаңыз"
+  },
+  "devices.choose": {
+    "en": "Choose devices before calibration. Device changes require recalibration.",
+    "ru": "Выберите устройства до калибровки. После смены устройства нужна новая калибровка.",
+    "kk": "Калибрлеуден бұрын құрылғыларды таңдаңыз. Ауыстырғаннан кейін қайта калибрлеңіз."
+  },
+  "devices.camera_changed": {
+    "en": "Switching camera; gaze calibration cleared.",
+    "ru": "Камера переключается; калибровка взгляда сброшена.",
+    "kk": "Камера ауыстырылуда; көзқарас калибрлеуі тазартылды."
+  },
+  "devices.mic_changed": {
+    "en": "Switching microphone; calibrate the new input.",
+    "ru": "Микрофон переключается; откалибруйте новый вход.",
+    "kk": "Микрофон ауыстырылуда; жаңа кірісті калибрлеңіз."
+  },
+  "voice.quiet": {
+    "en": "Please stay quiet for a moment.",
+    "ru": "Пожалуйста, немного помолчите.",
+    "kk": "Бір сәт тыныш отырыңыз."
+  },
+  "voice.speak": {
+    "en": "Now speak normally, as you would during the exam.",
+    "ru": "Теперь говорите обычным голосом, как во время экзамена.",
+    "kk": "Енді емтихандағыдай қалыпты дауыспен сөйлеңіз."
+  },
+  "voice.ready": {
+    "en": "Microphone calibrated.",
+    "ru": "Микрофон откалиброван.",
+    "kk": "Микрофон калибрленді."
+  },
+  "voice.silence": {
+    "en": "No microphone input. Check the selected device or mute switch.",
+    "ru": "Нет сигнала микрофона. Проверьте выбранное устройство и выключатель звука.",
+    "kk": "Микрофон сигналы жоқ. Таңдалған құрылғыны және дыбыс қосқышын тексеріңіз."
+  },
+  "voice.quiet_input": {
+    "en": "Your voice is too quiet. Move closer and retry.",
+    "ru": "Голос слишком тихий. Подвиньтесь ближе и повторите.",
+    "kk": "Дауысыңыз тым бәсең. Жақындап, қайталаңыз."
+  },
+  "voice.noise": {
+    "en": "Background noise is too high. Reduce noise and retry.",
+    "ru": "Фоновый шум слишком высокий. Уменьшите шум и повторите.",
+    "kk": "Фондық шу тым жоғары. Шуды азайтып, қайталаңыз."
+  },
+  "voice.clip": {
+    "en": "The input is clipping. Reduce microphone input volume and retry.",
+    "ru": "Входной сигнал перегружен. Уменьшите громкость микрофона и повторите.",
+    "kk": "Кіріс сигналы қиылуда. Микрофон дыбысын азайтып, қайталаңыз."
+  },
+  "voice.variation": {
+    "en": "No varying speech-level input. Speak naturally and retry.",
+    "ru": "Не обнаружено изменений уровня речи. Говорите естественно и повторите.",
+    "kk": "Сөйлеу деңгейінің өзгерісі анықталмады. Қалыпты сөйлеп, қайталаңыз."
+  },
+  "voice.ratio": {
+    "en": "Your voice is too quiet relative to noise. Move closer or reduce noise and retry.",
+    "ru": "Голос слишком тихий на фоне шума. Подвиньтесь ближе или уменьшите шум и повторите.",
+    "kk": "Дауысыңыз шуға қарағанда тым бәсең. Жақындаңыз немесе шуды азайтып, қайталаңыз."
+  },
+  "voice.high": {
+    "en": "Input level is too high. Reduce microphone input volume and retry.",
+    "ru": "Уровень входа слишком высокий. Уменьшите громкость микрофона и повторите.",
+    "kk": "Кіріс деңгейі тым жоғары. Микрофон дыбысын азайтып, қайталаңыз."
+  },
+  "voice.timeout": {
+    "en": "Microphone check timed out. Check the selected input and retry.",
+    "ru": "Время проверки истекло. Проверьте выбранный вход и повторите.",
+    "kk": "Микрофонды тексеру уақыты аяқталды. Кірісті тексеріп, қайталаңыз."
+  },
+  "devices.mic_idle": {
+    "en": "Choose your microphone, then select Calibrate microphone.",
+    "ru": "Выберите микрофон и нажмите «Откалибровать микрофон».",
+    "kk": "Микрофонды таңдап, «Микрофонды калибрлеу» түймесін басыңыз."
+  },
+  "voice.unavailable": {
+    "en": "Microphone unavailable. Check permissions, connection or another app using it.",
+    "ru": "Микрофон недоступен. Проверьте разрешения, подключение и использование другим приложением.",
+    "kk": "Микрофон қолжетімсіз. Рұқсаттарды, қосылымды және басқа қолданбаларды тексеріңіз."
+  },
+  "voice.missing": {
+    "en": "Selected microphone unavailable; choose an input device",
+    "ru": "Выбранный микрофон недоступен; выберите устройство ввода",
+    "kk": "Таңдалған микрофон қолжетімсіз; кіріс құрылғысын таңдаңыз."
+  },
+  "voice.format": {
+    "en": "Microphone format unsupported; choose another input device",
+    "ru": "Формат микрофона не поддерживается; выберите другой вход",
+    "kk": "Микрофон пішімі қолдау таппайды; басқа кірісті таңдаңыз."
+  }
+}

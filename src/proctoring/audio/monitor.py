@@ -233,8 +233,18 @@ class AudioMonitor(QObject):
         self._observations = deque(maxlen=40)
         self._status = {"state": "disabled" if not config.enabled else "not_started", "reason": ""}
         self._thread = None
-        self._detector = EnergyDetector(config)
+        from .gain import GainEnergyDetector
+        self._detector = GainEnergyDetector(config)
         self._last_level_signal = None
+        self.selection = None
+        self.device_key = None
+        self.stream_format = {}
+        self._switch_thread = None
+        self._switching = False
+        self._selection_error = None
+        self._switch_cancelled = False
+        self._calibration_requested_at = None
+        self._device_refresh = False
 
     @property
     def status(self):
@@ -244,7 +254,15 @@ class AudioMonitor(QObject):
     @property
     def check_status(self):
         with self._lock:
+            if (self._calibration_requested_at is not None and
+                    self._detector.check_status['state'] in {'ambient', 'speak'} and
+                    self.clock.monotonic()-self._calibration_requested_at > self.config.calibration_max_seconds):
+                self._detector._failure('no_signal', 'Microphone check timed out. Check the selected input and retry.')
             value = self._detector.check_status
+            value.update(device_key=self.device_key, stream_format=dict(self.stream_format))
+            if self._switching or self._device_refresh or self._selection_error:
+                value.update(state='initializing' if self._switching or self._device_refresh else 'unavailable', rms=0.,
+                             reason=self._selection_error or 'Switching microphone')
             if (value["timestamp"] is not None and self.clock.monotonic() - value["timestamp"] > .5
                     and self._status["state"] not in {"disabled", "stopped", "unavailable"}):
                 value.update(state="no_signal", rms=0., reason="Audio input is stale; retry microphone check")
@@ -260,19 +278,24 @@ class AudioMonitor(QObject):
 
     def start(self):
         with self._lock:
-            if not self.config.enabled or (self._thread is not None and self._thread.is_alive()):
+            if self._switching or self._device_refresh or self._selection_error or not self.config.enabled or (self._thread is not None and self._thread.is_alive()):
                 return
             self._stop.clear()
             self._last_level_signal = None
             self._detector.retry_input()
+            if self._detector.check_status['reason'] == 'Audio monitoring stopped':
+                self._detector._check_state, self._detector._check_reason = 'idle', ''
             self._status = {"state": "initializing", "reason": ""}
             self._thread = threading.Thread(target=self._run, name="audio-monitor", daemon=True)
             self._thread.start()
 
     def begin_calibration(self):
         with self._lock:
+            if self._switching or self._device_refresh or self._selection_error:
+                return False
             if not self._detector.begin_calibration():
                 return False
+            self._calibration_requested_at = self.clock.monotonic()
         self.start()
         return True
 
@@ -290,6 +313,44 @@ class AudioMonitor(QObject):
             self._detector.begin_exam()
         self.start()
 
+    def select_device(self, device):
+        """Invalidate immediately, then release the old native stream off the UI."""
+        with self._lock:
+            if self._detector._exam_started or self._switching or self._device_refresh:
+                return False
+            self._switching = True
+            self._switch_cancelled = False
+            self._selection_error = None
+            self._stop.set()
+            self._observations.clear()
+            self.selection = device
+        def switch():
+            self.stop(timeout=2.)
+            with self._lock:
+                if self._switch_cancelled:
+                    self._switching = False
+                    return
+                if self._thread is not None and self._thread.is_alive():
+                    self._selection_error = 'Previous microphone is still releasing; retry after disconnecting it'
+                    self._switching = False
+                    return
+                from .gain import GainEnergyDetector
+                self._detector = GainEnergyDetector(self.config)
+                self.device_key = None
+                self.stream_format = {}
+                self._observations.clear()
+                self._switching = False
+            self.start()
+        self._switch_thread = threading.Thread(target=switch, name='microphone-switch', daemon=True)
+        self._switch_thread.start()
+        return True
+
+    def unavailable_selection(self):
+        self._selection_error = 'Saved microphone unavailable; select another microphone'
+        self._stop.set()
+        with self._lock:
+            self._observations.clear()
+
     def drain(self):
         with self._lock:
             values = list(self._observations)
@@ -299,12 +360,27 @@ class AudioMonitor(QObject):
     def _run(self):
         try:
             factory = self._stream_factory
+            rate, channels, index = self.config.sample_rate, 1, None
             if factory is None:
                 import sounddevice
+                from ..devices import resolve_microphone, input_format
+                selected = resolve_microphone(self.selection, sounddevice)
+                rate, channels = input_format(selected, rate, sounddevice)
+                index = selected.index
+                if self.device_key is not None and self.device_key != selected.key:
+                    from .gain import GainEnergyDetector
+                    self._detector = GainEnergyDetector(self.config)
+                self.device_key = selected.key
                 factory = sounddevice.InputStream
-            size = max(1, int(self.config.sample_rate * .05))
-            with factory(samplerate=self.config.sample_rate, channels=1, dtype="float32",
-                         blocksize=size) as stream:
+            size = max(1, int(rate * .05))
+            options = dict(samplerate=rate, channels=channels, dtype='float32', blocksize=size)
+            if index is not None:
+                options['device'] = index
+            with factory(**options) as stream:
+                actual_rate = float(getattr(stream, 'samplerate', rate))
+                actual_channels = int(getattr(stream, 'channels', channels))
+                size = max(1, int(actual_rate*.05))
+                self.stream_format = {'sample_rate': actual_rate, 'channels': actual_channels}
                 with self._lock:
                     if self._stop.is_set():
                         return
@@ -341,14 +417,22 @@ class AudioMonitor(QObject):
                 if self._stop.is_set():
                     return
                 self._status = {"state": "unavailable", "reason": type(error).__name__}
-                self._detector.unavailable("Microphone unavailable (Audio monitoring disabled)")
+                message = 'Microphone unavailable. Check permissions, connection or another app using it.'
+                if type(error) is RuntimeError and str(error) in {
+                    'Selected microphone unavailable; choose an input device',
+                    'Microphone format unsupported; choose another input device'}:
+                    message = str(error)
+                self._detector.unavailable(message)
                 self.audio_level_changed.emit(0.)
             logging.getLogger(__name__).info("Optional audio input unavailable (%s)", type(error).__name__)
 
     def stop(self, timeout=.5):
         with self._lock:
+            if threading.current_thread() is not self._switch_thread:
+                self._switch_cancelled = True
             self._stop.set()
             self._status = {"state": "stopped", "reason": ""}
             self._detector.reset("Audio monitoring stopped")
+            self._observations.clear()
         if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(max(0., min(timeout, 2.)))

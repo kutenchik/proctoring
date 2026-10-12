@@ -68,6 +68,7 @@ class AppController:
         self._optional_status = {}
         self._device_info = {}
         self._optional_closed = False
+        self.device_selection_ready = True
         self._report_job = None
         self.audio = None
         self.audio_events = None
@@ -158,7 +159,7 @@ class AppController:
     def prepare_audio_check(self) -> None:
         """Open the one audio worker on setup, once registration is complete."""
         if (self.audio is not None and self.registration_complete
-                and not self.session.started and not self._optional_closed):
+                and self.device_selection_ready and not self.session.started and not self._optional_closed):
             # Unavailable input is retried only through the explicit Calibrate
             # button, not on every Qt refresh.
             if self.audio.status["state"] == "not_started":
@@ -169,10 +170,11 @@ class AppController:
             return {}
         check = getattr(self.audio, "check_status", {})
         return {"adaptive_calibration": self.config.audio.adaptive_calibration,
-                "units": "normalized_rms", **{key: check[key] for key in (
+                "units": check.get('units', 'normalized_rms'), **{key: check[key] for key in (
                     "state", "ambient", "recommended_threshold", "threshold", "sensitivity",
                     "threshold_source", "committed_threshold", "committed_ambient",
-                    "committed_recommended_threshold") if key in check}}
+                    "committed_recommended_threshold", 'gain', 'device_key', 'stream_format',
+                    'speech_rms_raw', 'ambient_rms_raw', 'calibration_peak_raw') if key in check}}
 
     @property
     def report_status(self) -> str:
@@ -370,10 +372,14 @@ class AppController:
 
     def prepare_monitoring(self) -> None:
         self._require_registration()
+        if not self.device_selection_ready:
+            raise RuntimeError('Wait for the device list before opening the camera')
         if self.mode == "camera" and not self.session.ended:
             self.monitor.start()
 
     def start(self) -> None:
+        if not self.device_selection_ready or (self.audio is not None and getattr(self.audio, '_switching', False)):
+            raise RuntimeError('Wait for device selection to finish before starting')
         self.poll_optional_workers()
         self._require_registration()
         status = self.preflight_status()

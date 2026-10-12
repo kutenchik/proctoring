@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (QGroupBox, QHBoxLayout, QLabel, QProgressBar,
                                QPushButton, QSlider, QVBoxLayout)
 
-from ..i18n import manager, t
+from ..i18n import manager, t, translate_text
 
 
 class AudioLevelMeter(QProgressBar):
@@ -60,10 +60,11 @@ class AudioCheckWidget(QGroupBox):
     timer coalesces state changes, so queued worker levels cannot flood the UI.
     """
 
-    def __init__(self, monitor, config, parent=None):
+    def __init__(self, monitor, config, parent=None, developer_mode=False):
         super().__init__(parent)
         self.monitor, self.config = monitor, config
         self._exam_active = False
+        self.developer_mode = developer_mode
         self._status = {}
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -77,6 +78,9 @@ class AudioCheckWidget(QGroupBox):
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(42)
         layout.addWidget(self.status_label)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        layout.addWidget(self.progress)
         self.calibrate_button = QPushButton()
         self.calibrate_button.clicked.connect(self._calibrate)
         layout.addWidget(self.calibrate_button)
@@ -173,14 +177,31 @@ class AudioCheckWidget(QGroupBox):
         else:
             message = t("audio_check.idle" if self.config.adaptive_calibration else "audio_check.fixed")
         self.status_label.setText(message)
+        if self._status.get('voice_gain_check'):
+            if state == 'idle' and not self._exam_active:
+                self.status_label.setText(t('devices.mic_idle'))
+            if not self._exam_active and self._status.get('reason'):
+                self.status_label.setText(translate_text(self._status['reason']))
+            self.calibrate_button.setText(t('devices.calibrate_mic'))
+            if self.developer_mode:
+                self.level_label.setText(
+                    f"Input RMS {self._status.get('input_rms', 0):.4f} · processed RMS {rms:.4f}\n"
+                    f"Gain {self._status.get('applied_gain', 1):.2f} · threshold {threshold:.4f} (processed RMS)")
+            self.level_label.setVisible(self.developer_mode)
+            for widget in (self.sensitivity_slider, self.sensitivity_label, self.sensitivity_value):
+                widget.setVisible(self.developer_mode)
+        self.progress.setVisible(state in ('ambient', 'speak', 'ready'))
+        self.progress.setValue(round(100*min(1., max(0., self._finite(self._status.get('progress'))))))
         self.status_label.setStyleSheet("color: " + ("#13776a" if state == "ready" else
-                                                     "#9b6511" if state in ("no_signal", "noisy", "unavailable")
+                                                     "#9b6511" if state in ("no_signal", "noisy", "unavailable", "clipping")
                                                      else "#213d51") + ";")
         allowed = not self._exam_active and state not in ("disabled", "initializing")
         # A disconnected/denied device can be retried explicitly; never reopen
         # it automatically on every setup refresh.
         self.calibrate_button.setText(t("audio_check.retry" if state == "unavailable" else
                                         "audio_check.calibrate"))
+        if self._status.get('voice_gain_check'):
+            self.calibrate_button.setText(t('devices.calibrate_mic'))
         self.calibrate_button.setEnabled(allowed and state not in ("ambient", "speak")
                                          and (state == "unavailable" or self.config.adaptive_calibration))
         self.sensitivity_slider.setEnabled(allowed and state not in ("ambient", "unavailable"))

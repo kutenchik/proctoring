@@ -67,6 +67,11 @@ class RealMonitor:
         self._identity_can_capture = False
         self._identity_reset_pending = False
         self._exam_active = False
+        self._switching = False
+        self._switch_cancelled = False
+        self._switch_thread = None
+        self._selection_error = None
+        self.selected_camera_id = None
         self._accessories = EarphoneHeuristicDetector(config.accessories)
 
     def configure_identity(self, config) -> None:
@@ -200,6 +205,8 @@ class RealMonitor:
 
     @property
     def latest_frame(self):
+        if self._switching or self._selection_error:
+            return None
         captured = self._camera.latest
         return captured.image if captured is not None else None
 
@@ -253,6 +260,8 @@ class RealMonitor:
         return result
 
     def start(self) -> None:
+        if self._switching or self._selection_error:
+            raise RuntimeError(self._selection_error or 'Camera is switching; wait for release')
         if self._thread and self._thread.is_alive():
             if self.stopped:
                 raise RuntimeError("Vision worker is still shutting down; wait before retrying")
@@ -281,6 +290,8 @@ class RealMonitor:
         self._thread.start()
 
     def stop(self, timeout: float = .5) -> None:
+        if threading.current_thread() is not self._switch_thread:
+            self._switch_cancelled = True
         self.set_exam_active(False)
         self._stop.set()
         self._camera.stop(timeout=0)
@@ -290,7 +301,50 @@ class RealMonitor:
             thread.join(timeout=max(0.0, deadline - time.monotonic()))
         self._camera.stop(timeout=max(0.0, deadline - time.monotonic()))
 
+    def unavailable_selection(self):
+        self._selection_error = 'Saved camera unavailable; select another camera'
+        self.stop(timeout=0)
+        self.calibration.reset()
+
+    def select_camera(self, device_id):
+        if self._exam_active or self._switching:
+            return False
+        self._switching, self._switch_cancelled = True, False
+        self._selection_error = None
+        self._stop.set()
+        self.calibration.reset()
+        def switch():
+            self.stop(timeout=3.)
+            if (self._thread and self._thread.is_alive()) or getattr(self._camera, 'alive', False):
+                self._selection_error = 'Previous camera is still releasing; reconnect it and retry'
+                self._switching = False
+                return
+            if self._switch_cancelled:
+                self._switching = False
+                return
+            if device_id:
+                from .qt_camera import NamedCamera
+                self._camera_factory = lambda config, clock: NamedCamera(config, clock, device_id)
+            else:
+                self._camera_factory = LatestFrameCamera
+            self.selected_camera_id = device_id
+            with self._lock:
+                self._latest_result = self._delivered_result = None
+                self._latest_face = self._latest_face_frame = self._latest_face_timestamp = None
+                self._identity_baseline = None
+                self._identity_can_capture = False
+            self._switching = False
+            try:
+                self.start()
+            except Exception as error:
+                self._selection_error = str(error)
+        self._switch_thread = threading.Thread(target=switch, name='camera-switch', daemon=True)
+        self._switch_thread.start()
+        return True
+
     def health(self, now: float) -> HealthStatus:
+        if self._switching or self._selection_error:
+            return HealthStatus(False, self._selection_error or 'Switching camera', now)
         frame = self._camera.latest
         camera_error = self._camera.error
         with self._lock:

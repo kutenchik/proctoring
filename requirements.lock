@@ -23,6 +23,7 @@ six==1.17.0
 sounddevice==0.5.6
 wheel==0.48.0
 PySide6-Essentials==6.11.2
+PySide6-Addons==6.11.2
 shiboken6==6.11.2
 pytest==9.1.1
 colorama==0.4.6

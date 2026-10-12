@@ -7,7 +7,7 @@ name = "local-proctoring"
 version = "0.4.0"
 description = "Local proctoring demo with offline CV and optional Windows protection"
 requires-python = ">=3.11"
-dependencies = ["PySide6-Essentials>=6.7,<7", "numpy>=1.26,<2", "opencv-contrib-python>=4.11,<4.12",
+dependencies = ["PySide6-Essentials>=6.8,<7", "PySide6-Addons>=6.8,<7", "sounddevice>=0.5,<0.6", "numpy>=1.26,<2", "opencv-contrib-python>=4.11,<4.12",
                 "onnxruntime>=1.20,<2", "mediapipe>=0.10.32,<0.11", "psutil>=6,<8",
                 "requests>=2.32,<3"]
 

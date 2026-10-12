@@ -28,6 +28,13 @@ energy_threshold = 0.15
 adaptive_calibration = true
 min_energy_threshold = 0.05
 max_energy_threshold = 0.40
+# Session-only app gain calibration; Windows microphone volume is unchanged.
+calibration_background_seconds = 1.5
+calibration_speech_seconds = 6.0
+calibration_max_seconds = 12.0
+speech_target_rms = 0.15
+max_gain = 8.0
+gain_smoothing_seconds = 0.25
 
 [reporting]
 generate_pdf_report = true

@@ -51,6 +51,12 @@ class AudioConfig:
     adaptive_calibration: bool = True
     min_energy_threshold: float = 0.05
     max_energy_threshold: float = 0.40
+    calibration_background_seconds: float = 1.5
+    calibration_speech_seconds: float = 6.0
+    calibration_max_seconds: float = 12.0
+    speech_target_rms: float = 0.15
+    max_gain: float = 8.0
+    gain_smoothing_seconds: float = 0.25
 
     def __post_init__(self):
         _flags(self, "audio", ("enabled", "adaptive_calibration"))
@@ -62,6 +68,13 @@ class AudioConfig:
         _number(self, "audio", "max_energy_threshold", maximum=1.0)
         if self.min_energy_threshold >= self.max_energy_threshold:
             raise ValueError("audio.min_energy_threshold must be below audio.max_energy_threshold")
+        for key in ('calibration_background_seconds', 'calibration_speech_seconds',
+                    'calibration_max_seconds', 'gain_smoothing_seconds'):
+            _number(self, 'audio', key, maximum=60.)
+        _number(self, 'audio', 'speech_target_rms', maximum=.5)
+        _number(self, 'audio', 'max_gain', maximum=16.)
+        if self.max_gain < 1 or self.calibration_max_seconds < self.calibration_background_seconds + self.calibration_speech_seconds:
+            raise ValueError('Audio gain/time bounds cannot complete calibration')
 
 
 @dataclass(frozen=True)

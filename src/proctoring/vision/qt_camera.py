@@ -90,7 +90,9 @@ class NamedCamera(LatestFrameCamera):
             def check():
                 if self.stopped:
                     loop.quit()
-                elif self.clock.monotonic() - (self.heartbeat or start) > 10.:
+                # A reopened same-source capture retains the outage timestamp
+                # and old heartbeat, but gets its own first-frame open grace.
+                elif self.clock.monotonic() - max(start, self.heartbeat or start) > 10.:
                     self._fail('Camera frames stopped; reconnect and retry camera')
                     loop.quit()
             timer = QTimer()

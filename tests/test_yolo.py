@@ -46,6 +46,13 @@ def test_decode_per_class_nms_keeps_phone_overlapping_person():
     assert persons[0].confidence == pytest.approx(.9)
 
 
+def test_disjoint_person_candidates_are_not_proof_of_two_actual_people():
+    # Reproduces the aggregation mechanism, NOT the attached video's model output.
+    data = predictions([((150,200,200,300),0,.9),((350,350,55,80),0,.7)])
+    persons, _ = decode(data,Letterbox(1,0,0,416,416),VisionConfig())
+    assert len(persons)==2  # IoU NMS cannot remove a disjoint false candidate.
+
+
 def test_decode_filters_tiny_people_low_confidence_and_unwanted_classes():
     data = predictions([((100, 100, 2, 2), 0, .95), ((100, 100, 100, 100), 0, .4),
                         ((200, 200, 100, 100), 67, .3), ((200, 200, 100, 100), 2, .95)])

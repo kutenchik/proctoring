@@ -292,6 +292,10 @@ def build_report_document(session_dir: Path, summary: dict, events: list[dict]):
         return escape(str(value if value is not None else "Not recorded"), quote=True)
 
     candidate = summary.get("candidate") or {}
+    candidate_name = candidate.get("full_name") or f'{candidate.get("first_name", "")} {candidate.get("last_name", "")}'.strip()
+    candidate_group = candidate.get("group_id", "")
+    if candidate.get("student_id"):
+        candidate_group = f'{candidate_group} / {candidate["student_id"]}'
     score = calculate_trust_score(events)
     color, band = (("#18735b", "Low Risk") if score >= 90 else
                    ("#9a6715", "Moderate Risk") if score >= 70 else ("#ab3546", "High Risk"))
@@ -299,8 +303,8 @@ def build_report_document(session_dir: Path, summary: dict, events: list[dict]):
              '<h1>Exam Proctoring Integrity Report</h1>',
              '<p class="muted">Recorded review events and available evidence. Human review is required.</p>',
              '<table width="100%" cellspacing="0" cellpadding="8"><tr><td width="73%">',
-             f'<b>Candidate:</b> {text(candidate.get("first_name", ""))} {text(candidate.get("last_name", ""))}<br>',
-             f'<b>Group / Student ID:</b> {text(candidate.get("group_id", ""))}<br>',
+             f'<b>Candidate:</b> {text(candidate_name)}<br>',
+             f'<b>Group / Student ID:</b> {text(candidate_group)}<br>',
              f'<b>Session:</b> {text(summary.get("session_id", session_dir.name))}<br>',
              f'<b>Ended:</b> {text(summary.get("ended_at"))}<br>',
              f'<b>Exam duration:</b> {_number(summary.get("elapsed_seconds")):.1f} seconds<br>',

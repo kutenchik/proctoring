@@ -136,6 +136,20 @@ def test_callback_does_not_duplicate_clipboard_audit_in_drain(app):
     checker.stop()
 
 
+def test_queued_clipboard_signal_after_independent_release_does_not_clear(app):
+    clipboard = Clipboard()
+    checker = SystemIntegrityChecker(SystemChecksConfig(clipboard_guard_enabled=True), clipboard=clipboard)
+    active = [True]
+    checker.clipboard_scope_guard = lambda: active[0]
+    checker.start_exam()
+    active[0] = False  # Independent native owner released before Qt processed input.
+    clipboard.set_text('normal desktop clipboard after release')
+    assert clipboard.clear_count == 0
+    assert clipboard.mime.text() == 'normal desktop clipboard after release'
+    assert not checker._clipboard_connected
+    assert not checker.drain_events()
+
+
 def test_clipboard_guard_does_not_materialize_image_payloads(app):
     clipboard = Clipboard()
     checker = SystemIntegrityChecker(SystemChecksConfig(clipboard_guard_enabled=True), clipboard=clipboard)

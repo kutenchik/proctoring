@@ -23,3 +23,36 @@ models/*.partial
 /tmp/
 *.pdf
 
+# Isolated Electron source build and local verification artifacts.
+/desktop/node_modules/
+/desktop/build-electron/
+/desktop/test-results/
+/desktop/playwright-report/
+/.tmp-npm-cache/
+
+# Teacher server private runtime data and its isolated development environment.
+/.venv-server/
+/server/data/
+/server/.env
+/server/environment.local.ps1
+
+
+# Checkpoint safety: private configuration, journals and generated runtime data.
+.env
+.env.*
+!.env.example
+.venv*/
+node_modules/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-*
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.pem
+*.key
+/config/stage4b-student.toml
+/test-results/
+/playwright-report/

@@ -10,6 +10,7 @@ from .vision.settings import VisionConfig
 from .vision.alignment import AlignmentConfig
 from .vision.accessories import AccessoriesConfig
 from .security.settings import ProtectionConfig
+from .connected.settings import ConnectedConfig
 from .settings import (RegistrationConfig, RemoteConfig, SystemChecksConfig,
                        IdentityConfig, AudioConfig, ReportingConfig)
 from .runtime import application_dir, asset_path, is_frozen, resource_root
@@ -63,6 +64,8 @@ class AppConfig:
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     reporting: ReportingConfig = field(default_factory=ReportingConfig)
+    source_path: Path | None = None
+    connected: ConnectedConfig = field(default_factory=ConnectedConfig)
 
     @property
     def exam(self) -> ExamConfig:
@@ -155,6 +158,7 @@ def load_config(path: Path = DEFAULT_CONFIG) -> AppConfig:
             EventType.FACE_ABSENT: _positive(events, "face_absent"),
         }
         return AppConfig(
+            source_path=path,
             duration_seconds=_positive(exam, "duration_seconds"),
             quiz_path=asset_path(exam["quiz_path"], path.parent), thresholds=thresholds,
             clearing_seconds=_positive(events, "clearing_seconds"),
@@ -172,6 +176,7 @@ def load_config(path: Path = DEFAULT_CONFIG) -> AppConfig:
             identity=_load_settings(IdentityConfig, exam.get("identity", {}), "exam.identity"),
             audio=_load_settings(AudioConfig, data.get("audio", {}), "audio"),
             reporting=_load_settings(ReportingConfig, data.get("reporting", {}), "reporting"),
+            connected=_load_settings(ConnectedConfig, data.get("connected", {}), "connected"),
         )
     except KeyError as error:
         raise ValueError(f"Missing configuration key: {error.args[0]}") from error

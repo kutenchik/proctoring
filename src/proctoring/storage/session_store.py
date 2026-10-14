@@ -38,8 +38,11 @@ class SessionStore:
     Snapshots are deliberately absent while observations are synthetic.
     """
 
-    def __init__(self, base_dir: Path, clock: Clock, candidate: dict | None = None):
-        self.path = Path(base_dir) / f"session-{uuid4().hex}"
+    def __init__(self, base_dir: Path, clock: Clock, candidate: dict | None = None, *, session_id=None):
+        import re
+        if session_id is not None and not re.fullmatch(r'session-[a-f0-9]{32}', session_id):
+            raise ValueError('Invalid session ID')
+        self.path = Path(base_dir) / (session_id or f"session-{uuid4().hex}")
         self.path.mkdir(parents=True, exist_ok=False)
         self._lock = threading.RLock()
         self._closed = False
@@ -57,6 +60,50 @@ class SessionStore:
             self._journal.close()
             self._closed = True
             raise
+
+    @classmethod
+    def resume_connected(cls, base_dir, session_id, attempt_id):
+        """Open only the exact original connected journal, never a new session."""
+        import re
+        if not re.fullmatch(r'session-[a-f0-9]{32}', session_id):
+            raise ValueError('Invalid session ID')
+        root = Path(base_dir).resolve()
+        path = root/session_id
+        if path.is_symlink() or path.resolve().parent != root:
+            raise ValueError('Unsafe session directory')
+        metadata = json.loads((path/'session.json').read_text(encoding='utf-8'))
+        if metadata.get('session_id') != session_id or metadata.get('connected_attempt', {}).get('attempt_id') != attempt_id:
+            raise ValueError('Connected session identity mismatch')
+        if (path/'summary.json').exists():
+            raise ValueError('Ended sessions cannot be resumed')
+        # A partial final line is an uncertain record, not permission to truncate it.
+        raw = (path/'events.jsonl').read_bytes()
+        if raw and not raw.endswith(b'\n'):
+            raise ValueError('Journal requires repair: partial record')
+        for line in raw.splitlines():
+            json.loads(line)
+        self = cls.__new__(cls)
+        self.path, self._metadata = path, metadata
+        self._lock, self._closed, self._snapshots = threading.RLock(), False, None
+        self._journal = (path/'events.jsonl').open('a', encoding='utf-8', newline='\n')
+        self._resumed = True
+        return self
+
+    def flush_durable(self):
+        with self._lock:
+            if not self._closed:
+                self._journal.flush()
+                os.fsync(self._journal.fileno())
+
+    @classmethod
+    def inspect_ended_connected(cls, base_dir, session_id, attempt_id):
+        from ..connected.sync import session_root
+        root = session_root(base_dir, {'session_id': session_id, 'attempt_id': attempt_id})
+        self = cls.__new__(cls)
+        self.path = root
+        self._metadata = json.loads((root/'session.json').read_bytes())
+        self._lock, self._closed, self._snapshots = threading.RLock(), True, None
+        return self
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -99,13 +146,16 @@ class SessionStore:
             raise ValueError("Invalid baseline JPEG")
         with self._lock:
             self._ensure_open()
-            temporary = self.path / ".reference_face.jpg.partial"
+            name = 'reference_face.jpg'
+            if getattr(self, '_resumed', False) and (self.path/name).exists():
+                name = 'reference_recovery_'+uuid4().hex+'.jpg'
+            temporary = self.path / ('.'+name+'.partial')
             try:
                 temporary.write_bytes(jpeg_bytes)
-                os.replace(temporary, self.path / "reference_face.jpg")
+                os.replace(temporary, self.path / name)
             finally:
                 temporary.unlink(missing_ok=True)
-            self.update_metadata({"reference_face": "reference_face.jpg", "identity_reference": metadata})
+            self.update_metadata({"reference_face": name, "identity_reference": metadata})
 
     def enqueue_snapshot(self, event_id: str, frame) -> None:
         self._ensure_open()

@@ -1,0 +1,17 @@
+{
+  "device_setup.test_camera": {
+    "en": "Test camera (preview only)",
+    "ru": "Проверить камеру (предпросмотр)",
+    "kk": "Камераны тексеру (алдын ала қарау)"
+  },
+  "device_setup.preview_only": {
+    "en": "Camera preview is active. No reference photo is saved until you choose Capture reference photo.",
+    "ru": "Камера включена для предпросмотра. Эталонное фото сохраняется только по нажатию кнопки снимка.",
+    "kk": "Камераның алдын ала көрінісі қосылды. Эталондық фото түсіру түймесін басқанда ғана сақталады."
+  },
+  "device_setup.camera_changed": {
+    "en": "Camera changed. Capture a new reference photo and repeat gaze calibration. Your details and microphone calibration are retained.",
+    "ru": "Камера изменена. Сделайте новое эталонное фото и повторите калибровку взгляда. Данные участника и калибровка микрофона сохранены.",
+    "kk": "Камера өзгертілді. Жаңа эталондық фото түсіріп, көзқарасты қайта калибрлеңіз. Жеке деректер мен микрофон калибрлеуі сақталды."
+  }
+}

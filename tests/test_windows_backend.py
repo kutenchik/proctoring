@@ -34,6 +34,7 @@ def backend(monkeypatch, hook_result=True, hotkey_result=True):
     instance = WindowsBackend.__new__(WindowsBackend)
     instance.hook = 123
     instance.hotkey_registered = True
+    instance._desktop_lock = None
     instance.user32 = SimpleNamespace(UnhookWindowsHookEx=unhook, UnregisterHotKey=unregister)
     return instance, calls
 

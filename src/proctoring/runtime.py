@@ -1,5 +1,5 @@
 """Read-only bundled assets and writable files beside the portable executable."""
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import sys
 
 
@@ -19,9 +19,18 @@ def application_dir() -> Path:
 
 def asset_path(value: str, base: Path) -> Path:
     """@bundle/ paths select embedded defaults; ordinary paths stay editable."""
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise ValueError("Asset path must be a non-empty local path")
     if value.startswith("@bundle/"):
+        relative = value[len("@bundle/"):]
+        # The reserved bundle form is a relative resource name, never a drive,
+        # UNC path, alternate data stream, or traversal through another folder.
+        parts = relative.replace("\\", "/").split("/")
+        if (not relative or PureWindowsPath(relative).anchor or ":" in relative
+                or any(part in ("", ".", "..") for part in parts)):
+            raise ValueError("Bundled asset path must be a relative resource name inside the bundle")
         root = resource_root()
-        result = (root / value[len("@bundle/"):]).resolve()
+        result = root.joinpath(*parts).resolve()
         if not result.is_relative_to(root):
             raise ValueError("Bundled asset path must stay inside the bundle")
         return result

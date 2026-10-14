@@ -172,3 +172,15 @@ def test_callback_failure_becomes_recovery(harness):
     runtime.backend.on_event("PROTECTION_RECOVERY", {"reason": "keyboard_callback_error"})
     assert runtime.backend is None and not runtime.lease.armed
     assert events[-1]["status"] == "RECOVERY"
+
+
+def test_containment_failure_details_are_saved_after_release_before_ack(harness):
+    runtime,clock,events=harness
+    arm(runtime,blocking=True)
+    backend=runtime.backend; clock.now+=1.
+    runtime.security('PROTECTION_RECOVERY',{'reason':'foreground_containment_failed','elapsed_seconds':1.,'attempts':11,'set_foreground_returned':False})
+    assert not backend.hook_installed and not backend.hotkey_registered
+    assert events[-2]['event_type']=='PROTECTION_RECOVERY'
+    assert events[-2]['details']['elapsed_seconds']==1. and events[-2]['details']['attempts']==11
+    assert events[-2]['monotonic_timestamp']==11.
+    assert events[-1]['status']=='RECOVERY' and events[-1]['reason']=='foreground_containment_failed'

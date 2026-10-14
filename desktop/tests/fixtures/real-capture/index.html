@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; media-src 'none'">
+<title>Isolated capture diagnostic</title>
+<style>body{font:18px system-ui;background:#f8f6f1;color:#202b29;margin:30px;padding-right:220px}button,select{font:inherit;padding:10px;margin:8px}header{position:sticky;top:0;background:#f8f6f1;padding:10px;z-index:1;border-bottom:1px solid #aaa}.camera-preview{position:fixed;right:20px;top:180px;width:180px;height:120px;background:#639a76;display:grid;place-items:center;text-align:center}.scroll-space{height:1800px;background:linear-gradient(#e9eee6,#f8f6f1);padding:20px}#status{font-weight:bold}label{display:block;margin:16px 0}</style></head>
+<body><header><h1>Isolated monitor-capture diagnostic</h1>
+<p id="mode">Awaiting consent. No capture has started.</p>
+<p>This reads the entire real monitor without masking, in memory after consent. It does not save or display frames. No camera, microphone, exam, account or API is used.</p>
+<label><input id="consent" type="checkbox"> I consent to this bounded monitor-capture experiment.</label>
+<button id="start" disabled>Start capture</button><button id="stop">Stop capture</button>
+<p id="status">Not running</p><p id="instruction">Arrange the window before starting. Stop or close it at any time.</p></header>
+<div class="camera-preview">Synthetic preview (unmasked)<br>No camera</div>
+<main><h2>Synthetic interaction area</h2><p>Click this ordinary background during the background-click phase.</p>
+<button id="button-a">Synthetic control A</button><button id="button-b">Synthetic control B</button>
+<label><input id="toggle" type="checkbox"> Synthetic toggle</label>
+<select aria-label="Synthetic selector"><option>Example one</option><option>Example two</option></select>
+<p id="local-counter">0 synthetic button clicks</p><div class="scroll-space">Scroll this page during the scroll phase. Values are not recorded.</div></main>
+<script src="renderer.js"></script></body></html>

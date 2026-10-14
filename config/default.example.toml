@@ -21,7 +21,7 @@ periodic_check_interval_seconds = 30.0
 
 [audio]
 # No audio recording; optional local energy monitoring only.
-enabled = false
+enabled = true
 sample_rate = 16000
 voice_duration_threshold = 2.0
 energy_threshold = 0.15

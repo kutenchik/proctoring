@@ -1,22 +1,163 @@
 # Local Proctoring
 
-[English](README.md) | [Русский](README.ru.md)
+[English](README.md) | [Р СѓСЃСЃРєРёР№](README.ru.md)
 
-A Windows desktop prototype for a controlled university proctoring demonstration.
-It combines an exam interface, local webcam inference, calibrated gaze estimates,
-review-event logging, optional evidence snapshots, and optional Windows session
-restrictions. CPU operation is supported; an NVIDIA GPU is not required.
+A local Windows proctoring application with a Python monitoring and authoritative
+exam workflow, an Electron/React student desktop, a FastAPI/SQLite service, and a
+React/TypeScript teacher dashboard. Connected mode supports remote teacher access
+through authenticated HTTPS/WSS. The legacy PySide6 student interface remains available.
 
-This README describes the current implementation, including the portable
-`LocalProctoring.exe` build and the editable configuration beside it. Feature
-availability and enabled options depend on the configuration you launch.
-The existing operator configurations may contain custom settings and credentials;
-do not assume their values match the baseline settings documented below.
+This is a development checkpoint, **not a production-readiness claim**. Implemented
+features, automated checks and physical verification are separate evidence levels.
+Stage 4B development is temporarily paused; it is **not fully accepted**.
 
-Git includes `config/default.example.toml` and
-`config/protected-demo.example.toml`. The working `default.toml` and
-`protected-demo.toml` files are local and ignored. Collected calibration data,
-generated PDFs, session evidence, and brag output are also excluded from Git.
+## Current capabilities
+
+- Native quizzes and externally hosted exams, registration, calibration and exam timing.
+- Local webcam monitoring, gaze calibration, phone and second-person detection,
+  suspicious-event logging and optional event JPEG snapshots.
+- Authorized live screen viewing, live event notifications, and teacher warning,
+  pause/resume and time-extension commands, subject to Python workflow validation.
+- Offline-tolerant evidence synchronization through a durable local outbox.
+- Consent-v3 event snapshot upload while an attempt is active and authenticated
+  teacher thumbnail/full-image viewing, implemented and locally tested.
+- Teacher event review, reports and PDF/XLSX export.
+- English, Russian and Kazakh interfaces.
+
+Detection results are review indicators, not proof of misconduct. Synthetic tests
+of transport and generated JPEGs do not validate real-camera behavior. Historical
+physical checks and their failures are documented in the stage reports below.
+
+## Architecture
+
+| Component | Responsibility |
+|---|---|
+| `desktop/` | Electron host and React student UI; restricted IPC to Python, isolated external exam view, consented screen capture and presentation |
+| `src/proctoring/` | Python exam authority, devices, calibration, detection, local journals and evidence; desktop bridge and legacy PySide6 entry point |
+| `teacher-web/` | React/TypeScript teacher website: exam administration, live workspace, authenticated review and reports |
+| `src/proctoring_server/` | Separate FastAPI service, SQLite persistence and numbered migrations; authentication, ownership, admissions, commands and synchronization |
+| `shared/` | Shared screen geometry, diagnostics and live transport contracts |
+| `src/proctoring/connected/` | Device-bound credentials and durable synchronization outbox; resumable records/files and final receipt verification |
+
+Authenticated WebSocket channels carry status, event notifications, signaling and
+control. Live screen viewing supports direct WebRTC and a bounded server relay.
+Live presence and viewer leases require a single server worker. Python remains
+authoritative for the exam clock and local lifecycle; the teacher browser does not
+advance the clock or directly bypass readiness checks.
+
+Early snapshot acknowledgement is distinct from final synchronization. Local
+evidence must remain until a complete matching server receipt has been verified;
+a successful early image upload alone must not trigger deletion. Failed or pending
+attempts retain their journals and evidence for recovery.
+
+## Source development
+
+Supported development prerequisites are Windows 10/11 x64, Python 3.11 x64 and
+Node.js 24 or newer. CPU inference is supported; an NVIDIA GPU is not required.
+Use the checked-in lockfiles and prepare the pinned local models. Installation
+requires network access unless dependencies/models are already available.
+
+From the repository root, prepare the **student** Python environment:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-stage4b-student.lock
+.\.venv\Scripts\python.exe -m pip install --no-deps --no-build-isolation -e .
+.\.venv\Scripts\python.exe scripts\fetch_models.py
+```
+
+For the Electron source UI (launching the live application can access configured devices):
+
+```powershell
+Set-Location desktop
+npm ci --ignore-scripts=false
+npm run dev -- --config config/default.example.toml
+```
+
+The config path resolves from the repository root. Use a private config copy for
+operator settings. See [Electron development](docs/ELECTRON_MIGRATION.md) for
+build/start commands and the `PROCTORING_PYTHON` interpreter override. The detailed
+legacy source workflow is retained below.
+
+Prepare the **server in a separate environment**, never in the student venv:
+
+```powershell
+py -3.11 -m venv .venv-server
+.\.venv-server\Scripts\python.exe -m pip install -r server\requirements.lock.txt
+```
+
+Follow [server setup](server/README.md) for environment variables, a fresh local
+database, migrations, invitations and the loopback API launch. It imports no device
+capture stack. In a separate shell from the repository root, the teacher UI uses:
+
+```powershell
+Set-Location teacher-web
+npm ci
+npm run dev
+```
+
+The teacher development server binds `127.0.0.1:5174` and proxies the local API;
+see [teacher setup](teacher-web/README.md). Never expose Vite as the public service.
+These are source workflows, not certification of a new Windows package or a fresh
+installation on every machine. No installation, build or runtime launch was performed
+for this documentation checkpoint.
+
+## Security and privacy
+
+Consent v3 is required for the current live snapshot protocol and its disclosure
+of event-associated evidence upload. Screen-sharing consent and attempt policy
+remain enforced. Teacher ownership is checked server-side; evidence access is
+authenticated. Exact HTTPS/WSS origins, secure teacher sessions and CSRF checks
+remain part of the connected service contract. The explicit HTTP exception is
+restricted to loopback development.
+
+Local credential journals use Windows current-user DPAPI; this is not hardware
+attestation. Keep private configuration, credentials, runtime SQLite databases,
+student journals, images and operational logs out of Git. Local evidence is retained
+until verified receipt-gated cleanup; do not manually remove pending attempts.
+
+Cloudflare Quick Tunnel is temporary development/demo infrastructure, not a stable
+production deployment. A changed hostname must not silently migrate an existing
+credential-bound attempt. Public experiments require a fresh isolated run, explicit
+approval and bounded ownership-aware shutdown. **Do not use the current automatic
+Stop/deadline path unattended: its multi-process record parser has a known defect.**
+
+## Current Stage 4B verification status вЂ” 14 October 2026
+
+| Check | Result |
+|---|---|
+| Public synthetic relay viewing | Passed: 377 frames over approximately 145 seconds, 2.60 FPS, accepted delivery ACKs. Low FPS is informational; stable usable viewing is the priority. |
+| Consent-v3 early event snapshots | Implemented and locally tested; public end-to-end acceptance incomplete. |
+| Latest public snapshot admission / event | Passed synthetic admission and remote вЂњSnapshot pendingвЂќ visibility without refresh or certificate warning. |
+| First JPEG chunk | Failed with a read timeout after 5.625 seconds; the remote image never became available. |
+| Final receipt / cleanup | No final synchronization receipt; local evidence retained and successful receipt-gated cleanup not exercised in this run. |
+| Automatic Stop | Demonstrated multi-process ownership-record parsing defect. Manual recovery with exact identity validation succeeded. |
+| Exposure closure | Public service confirmed closed within 7 minutes 30 seconds; historical evidence preserved. |
+| Acceptance limits | Stage 4B NOT fully accepted. Real-device live snapshots and complete public synchronization remain unverified. Protected-mode validation and packaging are not certified by these results. |
+
+The chunk timeout's cause is unresolved; it is not established as a Cloudflare
+failure. No automatic experiment retry is planned. Development is paused before
+investigating that timeout or the Stop parser defect.
+
+## Implementation and verification documents
+
+Reports record their stage's historical state; later reports supersede earlier
+policy/status statements without changing the older evidence.
+
+- [Stage 1 dashboard](docs/TEACHER_DASHBOARD_STAGE1.md) and [connected student](docs/CONNECTED_STUDENT_STAGE1.md).
+- [Stage 2 synchronization and review](docs/TEACHER_DASHBOARD_STAGE2.md), [contract](docs/TEACHER_STAGE2_CONTRACT.md), [student](docs/CONNECTED_STUDENT_STAGE2.md).
+- [Stage 3 live monitoring](docs/TEACHER_DASHBOARD_STAGE3.md), [contract](docs/TEACHER_STAGE3_CONTRACT.md), [student](docs/CONNECTED_STUDENT_STAGE3.md).
+- [Stage 4A physical checks](docs/TEACHER_DASHBOARD_STAGE4A.md), [capture result](docs/TEACHER_DASHBOARD_STAGE4A_REAL_CAPTURE_RESULT.md), [viewing resilience](docs/TEACHER_DASHBOARD_STAGE4A_VIEWING_RESILIENCE.md), [webcam-visible physical retest](docs/TEACHER_DASHBOARD_STAGE4A_WEBCAM_VISIBLE_PHYSICAL_RETEST.md).
+- [Stage 4B runbook](docs/TEACHER_DASHBOARD_STAGE4B.md), [physical test](docs/TEACHER_DASHBOARD_STAGE4B_PHYSICAL_TEST.md), [synthetic public relay test](docs/TEACHER_DASHBOARD_STAGE4B_SYNTHETIC_PUBLIC_TEST.md).
+- [Live snapshot implementation](docs/TEACHER_DASHBOARD_STAGE4B_LIVE_SNAPSHOTS.md), [preparation](docs/TEACHER_DASHBOARD_STAGE4B_LIVE_SNAPSHOT_PREPARATION.md), [first setup failure](docs/TEACHER_DASHBOARD_STAGE4B_LIVE_SNAPSHOT_PUBLIC_TEST.md), [ownership timestamp fix](docs/TEACHER_DASHBOARD_STAGE4B_OWNERSHIP_TIMESTAMP_FIX.md), [latest public snapshot test](docs/TEACHER_DASHBOARD_STAGE4B_LIVE_SNAPSHOT_PUBLIC_TEST_02.md).
+- [Electron migration](docs/ELECTRON_MIGRATION.md), [protection scope](docs/ELECTRON_PROTECTION.md) and [historical Windows build](docs/WINDOWS_BUILD.md).
+
+## Detailed local and legacy application guide
+
+The guidance below retains the existing local application configuration and device
+workflow reference. Portable EXE statements describe the historical legacy release,
+not a package of the current Electron/connected implementation. Current verification
+limits above take precedence over historical status statements.
 
 ## Contents
 
@@ -60,7 +201,7 @@ generated PDFs, session evidence, and brag output are also excluded from Git.
 
 The intended platform is **64-bit Windows 10/11**, a modern Intel/AMD CPU,
 **at least 8 GB RAM**, and one built-in or USB webcam. A microphone is optional.
-The default camera request is 1280×720; a driver may negotiate a lower resolution.
+The default camera request is 1280Г—720; a driver may negotiate a lower resolution.
 Keep enough writable disk space for the executable, temporary extraction, and
 session evidence. Actual inference speed must be measured on the demonstration PC.
 
@@ -82,8 +223,8 @@ EXE files are release assets, not files tracked in Git.
 
 ```text
 dist/LocalProctoring/
-├── LocalProctoring.exe
-└── config.toml
+в”њв”Ђв”Ђ LocalProctoring.exe
+в””в”Ђв”Ђ config.toml
 ```
 
 1. Copy both files together into a writable folder on the Windows PC.
@@ -201,7 +342,7 @@ was tested merely from a successful build of the existing environment.
 3. **Open camera** and wait for healthy monitoring and a clear live preview.
 4. **Align** within the fixed oval. Follow measured feedback such as Move closer,
    Center your face, Keep both eyes visible, and Hold still.
-5. **Start calibration** once and follow CENTER → LEFT → RIGHT → DOWN. Follow
+5. **Start calibration** once and follow CENTER в†’ LEFT в†’ RIGHT в†’ DOWN. Follow
    the preparation/countdown and collection cues. Retry only a failed target when
    the UI permits; use a new baseline after changing position or conditions.
 6. **Check the microphone**, when enabled: stay quiet for the ambient measurement,
@@ -252,7 +393,7 @@ remove necessary corrective glasses as a required solution.
 MediaPipe supplies landmarks and a face transform, **not gaze-left/right labels**.
 Floating-point iris features are normalized by eye width, with per-eye references
 learned in the current session. Fit checks consider sample count, target spread,
-constant uncertainty, and a configurable pixel uncertainty assumption. CENTER–DOWN
+constant uncertainty, and a configurable pixel uncertainty assumption. CENTERвЂ“DOWN
 uses vertical separation; the other pair checks retain their defined radial metric.
 Fit failure is not bypassed and cannot enable the exam.
 
@@ -290,11 +431,18 @@ dependent and must be checked independently of passing regression tests.
 
 ## 6. Devices and microphone calibration
 
-The camera setup page now has a **Devices** section: named camera and microphone
-selectors, **Refresh devices**, the existing live camera preview, and an audio meter.
+The **first screen** has a shared **Devices** panel, before the registration fields
+and selfie. Device selection, **Test camera (preview only)** and microphone
+calibration work before the form is complete. The same controls move to camera
+setup after registration; with registration disabled they start on that setup page.
+Selecting a camera alone does not activate it: use the explicit preview button.
 Camera names use Qt device IDs for capture; no mapping to OpenCV indices is assumed.
 The explicitly labelled configured OpenCV input remains available for older configs.
-Microphones show the input name, backend and current index; speakers are excluded.
+Microphones normally show friendly names using supported WASAPI inputs on Windows.
+**System default** names its resolved input. **Advanced audio devices** exposes
+alternative routes and technical details; speakers are excluded. Active refresh
+keeps the stream running; an explicit Advanced rescan discovers newly connected
+audio hardware by briefly stopping the test. Names are not assumed to be endpoint IDs.
 
 Choose the microphone, click **Calibrate microphone**, remain quiet for about
 **1.5 seconds**, then speak naturally for **6 seconds**. Progress and simple prompts
@@ -303,21 +451,30 @@ fixed, bounded application-side gain to the samples consumed by the detector.
 The level meter and trigger both use processed normalized RMS. Normal setup hides
 numerical controls; calibration debug mode exposes input/processed RMS and gain.
 
-The gain targets speech RMS 0.15, is capped at 8×, reserves peak headroom, ramps
+The gain prefers speech RMS 0.15, is capped at 8Г—, reserves peak headroom, ramps
 smoothly, and never grows during silence. Silence, constant noise, insufficient
 speech-level variation and clipped input cannot report calibration success.
+A quieter signal can pass when background and activity are sufficiently separated:
+the measured threshold lies between processed background and representative speech,
+even below the manual/fallback threshold floor. Reaching 0.15 is not mandatory.
 A failed retry retains a valid same-device gain/threshold. This lightweight activity
 check does not establish that sound is speech, identify the speaker, or remove noise.
 
-Switching cameras clears camera-dependent calibration and old results. Switching
+Switching cameras invalidates the reference selfie, gaze calibration and old results,
+requiring recapture while retaining entered details and microphone settings. Switching
 microphones clears only that input's calibration and buffers. Device switches are
 setup-only. Unavailable saved devices are shown explicitly. Device preferences use
 local Qt settings; gains/references are session-only, with numerical metadata in
 session records. Ambiguous duplicate microphone names must be reselected.
 
 A setup microphone test is available even with `audio.enabled = false`; this does
-**not** enable exam audio monitoring. With audio enabled, fresh exam samples use the
-same processing pipeline and existing audio-event timing. Microphone failure still
+**not** enable exam audio monitoring. With audio enabled, the same device retains its
+calibrated gain and effective threshold through registration, gaze setup and exam
+start. Audio events require **2.0 seconds of above-threshold captured audio** by
+default. Short inter-word gaps retain the candidate but add no activity time; a
+**0.75-second** below-threshold gap clears it. A sustained episode produces one
+review event. Buffer durations use the opened microphone's actual sample rate,
+independent of camera or UI refresh frequency. Microphone failure still
 does not pause the exam. The check is optional. No audio recordings are saved or
 uploaded, and neither Windows microphone volume nor website audio is modified.
 
@@ -388,12 +545,12 @@ The baseline configurable thresholds are:
 
 The raised-phone warning is exactly:
 
-> Phone raised — possible screen capture attempt.
+> Phone raised вЂ” possible screen capture attempt.
 
 This geometry heuristic cannot confirm phone camera orientation, shutter activity,
 or that a photograph was taken.
 
-Events transition **candidate → active → clearing → closed**. A sustained event
+Events transition **candidate в†’ active в†’ clearing в†’ closed**. A sustained event
 keeps one ID and updates its duration rather than repeatedly alerting or capturing
 snapshots. Brief detection gaps within clearing hysteresis retain that event.
 Only fresh observations advance evidence. Durations and timer decisions use a
@@ -512,7 +669,7 @@ short snippets in this README are edits to an existing complete file.
 | `monitoring.recovery_seconds` | 15.0 | Auto-resume/PIN interruption boundary. |
 | `monitoring.stale_seconds` | Positive; greater than synthetic interval | Observation freshness, particularly synthetic mode. |
 | `monitoring.synthetic_interval_ms` | Integer at least 10 | Synthetic observation cadence. |
-| `security.proctor_pin` | Private quoted 4–64 ASCII digits | Local PIN controls; omitted from saved public config. |
+| `security.proctor_pin` | Private quoted 4вЂ“64 ASCII digits | Local PIN controls; omitted from saved public config. |
 | `security.blocking_enabled` | false | Legacy compatibility field; must stay false. |
 | `protection.enabled` | false in code | Explicit real Windows protection switch. |
 | `protection.heartbeat_timeout_seconds` | 5.0 | Helper's UI-heartbeat release deadline. |
@@ -585,7 +742,7 @@ short snippets in this README are edits to an existing complete file.
 | `audio.voice_duration_threshold` | 2.0 | Sustained energy duration before a review event. |
 | `audio.energy_threshold` | 0.15 | Legacy fallback increment, not adaptive absolute threshold. |
 | `audio.adaptive_calibration` | true | Show ambient/speak calibration when audio is enabled. |
-| `audio.min_energy_threshold`, `max_energy_threshold` | 0.05, 0.40 | Adaptive/manual absolute RMS limits. |
+| `audio.min_energy_threshold`, `max_energy_threshold` | 0.05, 0.40 | Manual RMS bounds; the maximum also caps adaptive thresholds. A measured adaptive threshold may be below the manual minimum. |
 | `exam.identity.selfie_verification_enabled` | false | Require reference selfie and periodic shape comparison. |
 | `exam.identity.impersonation_threshold` | 0.40 | Unitless face-shape residual threshold. |
 | `exam.identity.periodic_check_interval_seconds` | 30.0 | Comparison interval. |
@@ -640,14 +797,14 @@ Started sessions normally create the following under the configured output root:
 
 ```text
 sessions/<session_id>/
-├── session.json              # Session identity, candidate and setup metadata
-├── config.json               # Public configuration with secrets omitted
-├── events.jsonl              # Session header and event/lifecycle records
-├── summary.json              # Final result, timings and completed event details
-├── snapshots/<event-id>.jpg  # Optional successfully written event snapshots
-├── reference_face.jpg        # Optional explicitly captured reference selfie
-├── remote_warnings.jsonl     # Optional local delivery failures
-└── exam_integrity_report.pdf # Optional final report
+в”њв”Ђв”Ђ session.json              # Session identity, candidate and setup metadata
+в”њв”Ђв”Ђ config.json               # Public configuration with secrets omitted
+в”њв”Ђв”Ђ events.jsonl              # Session header and event/lifecycle records
+в”њв”Ђв”Ђ summary.json              # Final result, timings and completed event details
+в”њв”Ђв”Ђ snapshots/<event-id>.jpg  # Optional successfully written event snapshots
+в”њв”Ђв”Ђ reference_face.jpg        # Optional explicitly captured reference selfie
+в”њв”Ђв”Ђ remote_warnings.jsonl     # Optional local delivery failures
+в””в”Ђв”Ђ exam_integrity_report.pdf # Optional final report
 ```
 
 An explicitly requested reference selfie can create its session directory before
@@ -741,7 +898,7 @@ See [REGISTRATION_REMOTE.md](docs/REGISTRATION_REMOTE.md) for payload details.
 
 ## 14. Languages
 
-Choose **EN**, **RU**, or **ҚАЗ** in the top-right header. Open widgets retranslate
+Choose **EN**, **RU**, or **ТљРђР—** in the top-right header. Open widgets retranslate
 without restarting or clearing answers, calibration, timers, or registration.
 The selection persists for the current application session and does not rewrite
 TOML. To set the next startup language:
@@ -909,7 +1066,7 @@ See [WINDOWS_BUILD.md](docs/WINDOWS_BUILD.md) for full packaging behavior.
 | Configuration cannot load | Check the selected file, TOML quoting, duplicate sections, required core keys, and the exact validation error. Restart after edits. |
 | Protected startup is refused | Keep Windows unlocked/desktop active and release the emergency chord. Close other instances and rerun the audit; inspect its failed check instead of editing the report to force a pass. |
 | Webcam is unavailable | Close other camera users, check Windows permissions/camera index, try the supported backend settings, and use Retry camera once previous workers release resources. |
-| Requested 720p becomes 640×480 | The driver negotiated another mode. Inspect actual dimensions and source eye widths; preview enlargement does not increase measurement resolution. |
+| Requested 720p becomes 640Г—480 | The driver negotiated another mode. Inspect actual dimensions and source eye widths; preview enlargement does not increase measurement resolution. |
 | Calibration will not collect | Read the alignment reason: centering, face/eye size, both eyes, pose, stability. Retry the affected target; preserve comfortable posture. |
 | Calibration fits fail | Inspect per-axis separation/spread, pixel/constant/spread contributions, and rejected samples in safe diagnostic mode. Do not force ready or count UNKNOWN as correct. |
 | DOWN becomes UNKNOWN | Inspect valid iris measurements, closure/aperture reasons, and reference proximity. Separate eye availability from the independent head-down posture cue. |

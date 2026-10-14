@@ -28,7 +28,8 @@ class RegistrationWidget(QWidget):
         self._error_key = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
-        layout.addStretch()
+        self.devices_layout = QVBoxLayout()
+        layout.addLayout(self.devices_layout)
         pane = QFrame()
         pane.setObjectName("card")
         pane.setMaximumWidth(680)
@@ -125,9 +126,11 @@ class RegistrationWidget(QWidget):
         except ValueError:
             self.continue_button.setEnabled(False)
             self.identity_open_button.setEnabled(False)
+            self.identity_capture_button.setEnabled(False)
         else:
             self.continue_button.setEnabled(self._identity_ready)
             self.identity_open_button.setEnabled(not self._identity_started)
+            self.identity_capture_button.setEnabled(self._identity_can_capture)
 
     def _submit(self):
         # Return/Enter must use the same validation as the disabled button.

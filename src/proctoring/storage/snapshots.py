@@ -2,6 +2,7 @@
 from pathlib import Path
 from queue import Empty, Full, Queue
 import re
+import os
 import threading
 
 
@@ -57,7 +58,10 @@ class SnapshotWriter:
                 self.directory.mkdir(parents=True, exist_ok=True)
                 target = self.directory / f"{event_id}.jpg"
                 temporary = target.with_suffix(".jpg.partial")
-                temporary.write_bytes(encoded.tobytes())
+                with temporary.open("wb") as output:
+                    output.write(encoded.tobytes())
+                    output.flush()
+                    os.fsync(output.fileno())
                 temporary.replace(target)
                 with self._lock:
                     self._paths[event_id] = f"snapshots/{target.name}"

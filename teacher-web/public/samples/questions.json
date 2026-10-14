@@ -1,0 +1,27 @@
+{
+  "title": "Stage 1 sample quiz",
+  "questions": [
+    {
+      "id": "q-capital",
+      "type": "single_choice",
+      "prompt": "Which city is the capital of Kazakhstan?",
+      "options": [
+        {"id": "astana", "text": "Astana"},
+        {"id": "almaty", "text": "Almaty"},
+        {"id": "shymkent", "text": "Shymkent"}
+      ],
+      "correct_option_ids": ["astana"]
+    },
+    {
+      "id": "q-even",
+      "type": "multiple_choice",
+      "prompt": "Select every even number.",
+      "options": [
+        {"id": "two", "text": "2"},
+        {"id": "three", "text": "3"},
+        {"id": "four", "text": "4"}
+      ],
+      "correct_option_ids": ["two", "four"]
+    }
+  ]
+}

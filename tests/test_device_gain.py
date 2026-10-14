@@ -103,7 +103,7 @@ def test_input_names_default_and_stable_restore_after_index_change():
     backend = Backend()
     choices = microphones(backend)
     assert len(choices) == 2 and choices[0].key == 'system-default'
-    assert 'USB microphone' in choices[1].label and 'WASAPI' in choices[1].label
+    assert choices[1].label == 'USB microphone' and 'WASAPI' in choices[1].details
     backend.rows.insert(0, dict(backend.rows[0]))
     restored = restore_device(choices[1].key, microphones(backend))
     assert restored.index == 2
@@ -141,7 +141,7 @@ def test_selected_backend_device_and_negotiated_format_reach_stream(monkeypatch)
     monitor._thread.join(2)
     assert opened[0] == dict(device=1, samplerate=48000, channels=2, dtype='float32', blocksize=2400)
     assert opened[-1] == 'closed'
-    assert monitor.stream_format == {'sample_rate': 48000, 'channels': 2}
+    assert monitor.stream_format == {'sample_rate': 48000, 'channels': 2, 'dtype': 'float32'}
     assert monitor.drain() == []  # Buffer arriving after stop is discarded.
 
 

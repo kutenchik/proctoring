@@ -1,0 +1,5 @@
+import type { TextKey } from '../locales';
+export type Scene = 'setup' | 'mic-quiet' | 'mic-speak' | 'mic-result' | 'gaze' | 'gaze-collect' | 'gaze-rejected' | 'ready' | 'exam' | 'pause-short' | 'pause-pin' | 'pause-proctor' | 'summary' | 'summary-empty' | 'summary-error' | 'disconnected';
+export const scenes: { id: Scene; key: TextKey }[] = [
+  { id: 'setup', key: 'stepDevices' }, { id: 'mic-quiet', key: 'fixtureQuiet' }, { id: 'mic-speak', key: 'fixtureSpeak' }, { id: 'mic-result', key: 'fixtureResult' }, { id: 'gaze', key: 'fixtureGaze' }, { id: 'gaze-collect', key: 'fixtureCollect' }, { id: 'gaze-rejected', key: 'fixtureRejected' }, { id: 'ready', key: 'ready' }, { id: 'exam', key: 'exam' }, { id: 'pause-short', key: 'fixtureShort' }, { id: 'pause-pin', key: 'fixturePin' }, { id: 'pause-proctor', key: 'fixtureProctor' }, { id: 'summary', key: 'summary' }, { id: 'summary-empty', key: 'fixtureEmpty' }, { id: 'summary-error', key: 'fixtureError' }, { id: 'disconnected', key: 'disconnected' },
+];

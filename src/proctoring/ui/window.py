@@ -175,10 +175,13 @@ class MainWindow(QMainWindow):
         self.registration_page = None
         self.audio_check_widget = None
         self.devices_widget = None
+        self.device_controls = None
         if not controller.registration_complete or (controller.config.identity.selfie_verification_enabled
                                                     and not controller.identity_ready):
             self._build_registration()
         self._build_setup()
+        if self.camera_mode and hasattr(controller.monitor, 'select_camera'):
+            self._build_device_controls()
         self._build_exam()
         self._build_summary()
         self.preflight_label = label("", "banner", True)
@@ -267,7 +270,7 @@ class MainWindow(QMainWindow):
         self.registration_widget.identity_capture_requested.connect(self._capture_identity)
         self.registration_widget.layout().addWidget(label(self._data_description(), "subtitle", True))
         self.registration_page = self.registration_widget
-        if self.controller.config.identity.selfie_verification_enabled:
+        if self.camera_mode or self.controller.config.identity.selfie_verification_enabled:
             # The selfie preview adds vertical content. Honor the preview and
             # form minimum sizes, keeping controls reachable on laptop screens.
             self.registration_widget.layout().setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
@@ -276,6 +279,45 @@ class MainWindow(QMainWindow):
             self.registration_page.setFrameShape(QFrame.Shape.NoFrame)
             self.registration_page.setWidget(self.registration_widget)
         self.stack.addWidget(self.registration_page)
+
+    def _build_device_controls(self) -> None:
+        """One panel moves between pages; all previews share the same worker."""
+        from .devices import DevicesWidget
+        self.device_controls = QWidget()
+        controls = QVBoxLayout(self.device_controls)
+        controls.setContentsMargins(0, 0, 0, 0)
+        self.devices_widget = DevicesWidget(self.controller)
+        controls.addWidget(self.devices_widget)
+        self.devices_widget.camera_changing.connect(self._camera_device_changed)
+        self.test_camera_button = QPushButton(t('device_setup.test_camera'))
+        self.test_camera_button.clicked.connect(self._test_camera)
+        controls.addWidget(self.test_camera_button)
+        self.device_test_status = QLabel()
+        self.device_test_status.setWordWrap(True)
+        controls.addWidget(self.device_test_status)
+        self.audio_check_widget = AudioCheckWidget(
+            self.devices_widget.audio, replace(self.controller.config.audio, enabled=True),
+            developer_mode=self.controller.config.vision.calibration_debug)
+        controls.addWidget(self.audio_check_widget)
+        manager.language_changed.connect(lambda *_: self.test_camera_button.setText(t('device_setup.test_camera')))
+        if self.registration_widget is not None:
+            self.registration_widget.devices_layout.addWidget(self.device_controls)
+            self.registration_widget.identity_box.show()
+            if not self.controller.config.identity.selfie_verification_enabled:
+                for item in (self.registration_widget.identity_note, self.registration_widget.identity_status_label,
+                             self.registration_widget.identity_open_button, self.registration_widget.identity_capture_button):
+                    item.hide()
+                self.registration_widget.identity_box.setMinimumHeight(180)
+        else:
+            self.setup_devices_layout.addWidget(self.device_controls)
+
+    def _test_camera(self) -> None:
+        try:
+            self.controller.prepare_camera_preview()
+            self.device_test_status.setText(t('device_setup.preview_only'))
+        except (ValueError, RuntimeError, OSError) as error:
+            self.device_test_status.setText(translate_text(str(error)))
+        self._refresh_optional()
 
     def _prepare_identity(self, info: dict) -> None:
         try:
@@ -288,7 +330,9 @@ class MainWindow(QMainWindow):
 
     def _capture_identity(self) -> None:
         try:
+            self.controller.register_candidate(self.registration_widget.candidate_info())
             self.controller.capture_identity_baseline()
+            self.registration_widget.identity_started()
         except (ValueError, RuntimeError, OSError) as error:
             self.registration_widget.set_identity_state(ready=False, status=str(error))
             return
@@ -303,6 +347,8 @@ class MainWindow(QMainWindow):
         except (ValueError, RuntimeError):
             self.registration_widget.show_submission_error()
             return
+        if self.device_controls is not None:
+            self.setup_devices_layout.addWidget(self.device_controls)
         self.registration_widget.setEnabled(False)
         self.setup_page.setEnabled(True)
         self.stack.setCurrentWidget(self.setup_page)
@@ -327,6 +373,8 @@ class MainWindow(QMainWindow):
             self._build_camera_setup()
             return
         self.setup_page, layout = self._page()
+        self.setup_devices_layout = QVBoxLayout()
+        layout.addLayout(self.setup_devices_layout)
         layout.addStretch()
         pane, content = card()
         content.addWidget(label("LOCAL PROCTORING / DEVELOPMENT DEMO", "eyebrow"))
@@ -383,6 +431,8 @@ class MainWindow(QMainWindow):
 
     def _build_camera_setup(self) -> None:
         self.setup_page, layout = self._page()
+        self.setup_devices_layout = QVBoxLayout()
+        layout.addLayout(self.setup_devices_layout)
         layout.addWidget(label("LOCAL PROCTORING / CAMERA DEMO", "eyebrow"))
         layout.addWidget(label("Prepare your camera and calibrate your gaze", "title"))
         protection_note = ("Windows protection will activate when the calibrated exam starts."
@@ -402,11 +452,6 @@ class MainWindow(QMainWindow):
         content.addWidget(self.open_camera_button)
         self.setup_health = label("Camera not started", "subtitle", True)
         content.addWidget(self.setup_health)
-        if hasattr(self.controller.monitor, 'select_camera'):
-            from .devices import DevicesWidget
-            self.devices_widget = DevicesWidget(self.controller)
-            content.addWidget(self.devices_widget)
-            self.devices_widget.camera_changing.connect(self._camera_device_changed)
         self.calibration_widget = CalibrationWidget(
             self.controller.monitor.calibration, self.controller.config.vision.calibration_samples,
             self.controller.config.vision.result_stale_seconds,
@@ -441,7 +486,7 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.setup_preview, 1)
         self.setup_metrics = label("Waiting for monitoring", "subtitle", True)
         preview_layout.addWidget(self.setup_metrics)
-        if self.devices_widget is not None or self.controller.config.audio.enabled:
+        if not hasattr(self.controller.monitor, 'select_camera') and self.controller.config.audio.enabled:
             from dataclasses import replace
             audio = self.devices_widget.audio if self.devices_widget else self.controller.audio
             self.audio_check_widget = AudioCheckWidget(audio, replace(self.controller.config.audio, enabled=True),
@@ -845,6 +890,17 @@ class MainWindow(QMainWindow):
         self.calibration_widget.reset()
         self.setup_preview.set_frame(None, message='Switching camera')
         self.start_button.setEnabled(False)
+        if self.device_controls is not None:
+            self.device_test_status.setText(t('device_setup.camera_changed'))
+        if self.registration_widget is not None:
+            self.registration_widget.set_identity_preview(None, None, False)
+            if self.controller.config.identity.selfie_verification_enabled:
+                self.registration_widget.setEnabled(True)
+                self.registration_widget.set_identity_state(ready=False, status=t('device_setup.camera_changed'))
+                if self.device_controls is not None:
+                    self.registration_widget.devices_layout.addWidget(self.device_controls)
+                self.setup_page.setEnabled(False)
+                self.stack.setCurrentWidget(self.registration_page)
 
     def _retry_camera(self) -> None:
         if not self._require_registration():
@@ -1016,6 +1072,7 @@ class MainWindow(QMainWindow):
     def _refresh_optional(self) -> None:
         if self.devices_widget is not None:
             self.devices_widget.update_session()
+            self.test_camera_button.setEnabled(self.devices_widget.isEnabled())
         if self.audio_check_widget is not None:
             started = self.controller.session.started
             self.audio_check_widget.set_exam_active(started)
@@ -1029,10 +1086,11 @@ class MainWindow(QMainWindow):
             self.start_button.setEnabled(self.controller.registration_complete and status["ready"]
                                          and (not self.controller.config.identity.selfie_verification_enabled
                                               or self.controller.identity_ready))
-        if self.registration_widget is not None and self.controller.config.identity.selfie_verification_enabled:
-            self.registration_widget.set_identity_state(
-                ready=self.controller.identity_ready, status=self.controller.identity_status,
-                can_capture=self.controller.identity_can_capture)
+        if self.registration_widget is not None:
+            if self.controller.config.identity.selfie_verification_enabled:
+                self.registration_widget.set_identity_state(
+                    ready=self.controller.identity_ready, status=self.controller.identity_status,
+                    can_capture=self.controller.identity_can_capture)
             monitor = self.controller.monitor
             result = getattr(monitor, "latest_result", None)
             healthy = self.camera_mode and monitor.health(self.controller.clock.monotonic()).healthy
@@ -1053,6 +1111,19 @@ class MainWindow(QMainWindow):
             message = getattr(self.controller, "audio_status", "")
             if message:
                 messages.append(message)
+        if self.controller.config.vision.calibration_debug and self.controller.audio is not None:
+            debug = self.controller.audio_debug_status()
+            def number(value):
+                return '—' if value is None else f'{value:.4f}'
+            messages.append(
+                f"AUDIO DEBUG · {debug['session_state']} · enabled={debug['audio_enabled']} · worker={debug['worker_running']}\n"
+                f"Config: {debug['config_path']}\n"
+                f"Input: {debug['resolved_microphone'] or debug['selected_microphone']} · {debug['stream_format']}\n"
+                f"Age {number(debug['buffer_age_seconds'])}s · gain {number(debug['applied_gain'])} · "
+                f"processed RMS {number(debug['processed_rms'])} · threshold {number(debug['threshold'])} ({debug['threshold_source']})\n"
+                f"Activity {debug['candidate_duration_seconds']:.2f}/{debug['required_duration_seconds']:.2f}s · "
+                f"{debug['event_state']} · events {debug['activated_event_count']} · "
+                f"last reset/clear: {debug['reset_or_clear_reason'] or '—'}")
         if self.controller.config.reporting.generate_pdf_report:
             report = getattr(self.controller, "report_status", "disabled")
             key = "report.closing" if self._report_close_pending else f"report.{report}"

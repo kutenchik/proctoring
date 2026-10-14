@@ -39,4 +39,7 @@ class Observation:
     timestamp: float
     conditions: dict[EventType, float | None] = field(default_factory=dict)
     source: str = "synthetic"
+    # Optional measured interval for sampled signals (audio). CV keeps timestamp
+    # semantics; it must not infer a buffer duration from camera/UI frequency.
+    duration_seconds: float | None = None
 

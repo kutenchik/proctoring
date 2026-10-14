@@ -20,6 +20,7 @@ class SessionController:
                 raise ValueError(f"{name} must be finite and positive")
         self.clock = clock
         self.duration_seconds = float(duration_seconds)
+        self.time_adjustment_ids = []
         self.recovery_seconds = float(recovery_seconds)
         self.started = False
         self.ended = False
@@ -106,9 +107,39 @@ class SessionController:
         if not self.monitoring_healthy:
             raise RuntimeError("Monitoring must be healthy before starting")
         self.started = True
-        self._running_since = self.clock.monotonic()
-        self._timing_boundary = self._running_since
-        self._record("session_started")
+        now = self.clock.monotonic()
+        self._running_since = now if not self._pause_reasons else None
+        self._timing_boundary = now
+        self._record("session_recovered" if getattr(self, '_restored', False) else "session_started")
+
+    def restore_connected_checkpoint(self, checkpoint):
+        """After teacher authorization, before ordinary start/readiness/arming.
+
+        Closed time is never accrued. Monitoring/presentation are re-established
+        by fresh checks; independent human pause/PIN requirements are retained.
+        """
+        if self.started or self.ended or checkpoint.get('ended'):
+            raise ValueError('Terminal or running sessions cannot recover')
+        duration = checkpoint.get('duration_seconds', self.duration_seconds)
+        adjustment_ids = checkpoint.get('time_adjustment_ids', [])
+        if (type(duration) not in (int,float) or not math.isfinite(duration) or not self.duration_seconds <= duration <= 172800 or
+                not isinstance(adjustment_ids, list) or len(adjustment_ids)>2048 or
+                any(not isinstance(value,str) or not 1 <= len(value) <= 128 for value in adjustment_ids) or
+                len(set(adjustment_ids)) != len(adjustment_ids) or (duration != self.duration_seconds and not adjustment_ids)):
+            raise ValueError('Invalid saved time allowance')
+        self.duration_seconds = float(duration)
+        self.time_adjustment_ids = list(adjustment_ids)
+        elapsed = checkpoint['elapsed_seconds']
+        if type(elapsed) not in (float, int) or not math.isfinite(elapsed) or not 0 <= elapsed < self.duration_seconds:
+            raise ValueError('Invalid recovery timing')
+        reasons = set(checkpoint.get('pause_reasons', []))
+        if not reasons <= {'proctor', 'recovery_pin', 'monitoring', 'presentation', 'teacher', 'display'}:
+            raise ValueError('Unknown saved pause reason')
+        self._elapsed = float(elapsed)
+        self._running_since = None
+        self._pause_reasons = reasons & {'proctor', 'recovery_pin', 'teacher', 'display'}
+        self.records = list(checkpoint.get('lifecycle', []))
+        self._restored = any(r.get('event_type') == 'session_started' for r in self.records)
 
     def tick(self) -> None:
         """Check expiry and recovery deadline; callback frequency is irrelevant."""
@@ -172,6 +203,28 @@ class SessionController:
         self._record("proctor_paused")
         return True
 
+    def presentation_lost(self) -> bool:
+        """Electron presentation loss is independent of camera/PIN recovery."""
+        now = self._synchronize()
+        if not self.started or self.ended or 'presentation' in self._pause_reasons:
+            return False
+        self._freeze(now)
+        self._pause_reasons.add('presentation')
+        self._record('presentation_lost')
+        return True
+
+    def presentation_recovered(self) -> bool:
+        """Call only after the trusted host acknowledged a fresh state snapshot."""
+        now = self._synchronize()
+        if not self.started or self.ended or 'presentation' not in self._pause_reasons:
+            return False
+        self._pause_reasons.discard('presentation')
+        if self.running:
+            self._running_since = now
+            self._timing_boundary = now
+        self._record('presentation_recovered', resumed=self.running)
+        return True
+
     def resume_by_proctor(self, pin_valid: bool) -> bool:
         now = self._synchronize()
         if (not self.started or self.ended or not pin_valid
@@ -196,6 +249,67 @@ class SessionController:
         self.end_reason = reason
         self._pause_reasons.clear()
         self._record("session_ended", reason=reason)
+
+    def teacher_pause(self, **audit) -> bool:
+        now = self._synchronize()
+        if not self.started or self.ended:
+            return False
+        self._freeze(now)
+        changed = 'teacher' not in self._pause_reasons
+        self._pause_reasons.add('teacher')
+        self._record('teacher_paused', changed=changed, **audit)
+        return True
+
+    def teacher_resume(self, **audit) -> bool:
+        now = self._synchronize()
+        if not self.started or self.ended or 'teacher' not in self._pause_reasons:
+            return False
+        self._pause_reasons.discard('teacher')
+        if self.running:
+            self._running_since = self._timing_boundary = now
+        self._record('teacher_resumed', resumed=self.running, **audit)
+        return True
+
+    def teacher_monitoring_recovery(self, **audit) -> bool:
+        now = self._synchronize()
+        if not self.started or self.ended or not self.monitoring_healthy or not self.recovery_pin_required:
+            return False
+        self._pause_reasons.discard('recovery_pin')
+        if self.running:
+            self._running_since = self._timing_boundary = now
+        self._record('teacher_monitoring_recovered', resumed=self.running, **audit)
+        return True
+
+    def display_pause(self, **audit) -> bool:
+        now = self._synchronize()
+        if not self.started or self.ended or 'display' in self._pause_reasons:
+            return False
+        self._freeze(now)
+        self._pause_reasons.add('display')
+        self._record('display_interrupted', **audit)
+        return True
+
+    def teacher_display_recovery(self, **audit) -> bool:
+        now = self._synchronize()
+        if not self.started or self.ended or 'display' not in self._pause_reasons:
+            return False
+        self._pause_reasons.discard('display')
+        if self.running:
+            self._running_since = self._timing_boundary = now
+        self._record('teacher_display_recovered', resumed=self.running, **audit)
+        return True
+
+    def teacher_add_time(self, seconds, command_id, **audit) -> bool:
+        self._synchronize()
+        if (not self.started or self.ended or type(seconds) is not int or not 1 <= seconds <= 3600 or
+                self.duration_seconds+seconds > 172800 or command_id in self.time_adjustment_ids):
+            return False
+        old = self.duration_seconds
+        self.duration_seconds += seconds
+        self.time_adjustment_ids.append(command_id)
+        self._record('teacher_time_added', old_duration_seconds=old, duration_seconds=self.duration_seconds,
+                     delta_seconds=seconds, command_id=command_id, **audit)
+        return True
 
     def end(self, reason: str = "completed") -> bool:
         now = self._synchronize()

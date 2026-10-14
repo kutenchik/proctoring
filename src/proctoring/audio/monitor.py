@@ -16,6 +16,7 @@ class AudioObservation:
     rms: float
     baseline: float | None
     healthy: bool = True
+    duration_seconds: float | None = None
 
 
 class EnergyDetector:
@@ -238,6 +239,7 @@ class AudioMonitor(QObject):
         self._last_level_signal = None
         self.selection = None
         self.device_key = None
+        self.resolved_device = None
         self.stream_format = {}
         self._switch_thread = None
         self._switching = False
@@ -257,15 +259,17 @@ class AudioMonitor(QObject):
             if (self._calibration_requested_at is not None and
                     self._detector.check_status['state'] in {'ambient', 'speak'} and
                     self.clock.monotonic()-self._calibration_requested_at > self.config.calibration_max_seconds):
-                self._detector._failure('no_signal', 'Microphone check timed out. Check the selected input and retry.')
+                self._detector._failure('no_signal', 'Microphone check timed out: no fresh input. Check the selected input and retry.', 'no_fresh_input')
             value = self._detector.check_status
-            value.update(device_key=self.device_key, stream_format=dict(self.stream_format))
+            value.update(device_key=self.device_key, resolved_device=self.resolved_device,
+                         stream_format=dict(self.stream_format))
             if self._switching or self._device_refresh or self._selection_error:
                 value.update(state='initializing' if self._switching or self._device_refresh else 'unavailable', rms=0.,
                              reason=self._selection_error or 'Switching microphone')
             if (value["timestamp"] is not None and self.clock.monotonic() - value["timestamp"] > .5
                     and self._status["state"] not in {"disabled", "stopped", "unavailable"}):
                 value.update(state="no_signal", rms=0., reason="Audio input is stale; retry microphone check")
+                value['rejection_code'] = 'no_fresh_input'
             return value
 
     @property
@@ -318,6 +322,14 @@ class AudioMonitor(QObject):
         with self._lock:
             if self._detector._exam_started or self._switching or self._device_refresh:
                 return False
+            previous = getattr(self.selection, 'key', 'system-default')
+            requested = getattr(device, 'key', 'system-default')
+            if (previous == requested and
+                    getattr(self.selection, 'signature', '') == getattr(device, 'signature', '') and
+                    (requested != 'system-default' or self.device_key is None or
+                     getattr(device, 'default_target_key', '') == self.device_key) and
+                    not self._selection_error):
+                return True
             self._switching = True
             self._switch_cancelled = False
             self._selection_error = None
@@ -337,7 +349,9 @@ class AudioMonitor(QObject):
                 from .gain import GainEnergyDetector
                 self._detector = GainEnergyDetector(self.config)
                 self.device_key = None
+                self.resolved_device = None
                 self.stream_format = {}
+                self._calibration_requested_at = None
                 self._observations.clear()
                 self._switching = False
             self.start()
@@ -367,10 +381,13 @@ class AudioMonitor(QObject):
                 selected = resolve_microphone(self.selection, sounddevice)
                 rate, channels = input_format(selected, rate, sounddevice)
                 index = selected.index
-                if self.device_key is not None and self.device_key != selected.key:
-                    from .gain import GainEnergyDetector
-                    self._detector = GainEnergyDetector(self.config)
-                self.device_key = selected.key
+                with self._lock:
+                    if self.device_key is not None and self.device_key != selected.key:
+                        from .gain import GainEnergyDetector
+                        self._detector = GainEnergyDetector(self.config)
+                        self._calibration_requested_at = None
+                    self.device_key = selected.key
+                    self.resolved_device = selected.label
                 factory = sounddevice.InputStream
             size = max(1, int(rate * .05))
             options = dict(samplerate=rate, channels=channels, dtype='float32', blocksize=size)
@@ -379,8 +396,12 @@ class AudioMonitor(QObject):
             with factory(**options) as stream:
                 actual_rate = float(getattr(stream, 'samplerate', rate))
                 actual_channels = int(getattr(stream, 'channels', channels))
+                if not math.isfinite(actual_rate) or actual_rate <= 0 or actual_channels < 1:
+                    raise ValueError('Invalid audio stream format')
                 size = max(1, int(actual_rate*.05))
-                self.stream_format = {'sample_rate': actual_rate, 'channels': actual_channels}
+                self.stream_format = {'sample_rate': actual_rate, 'channels': actual_channels,
+                                      'dtype': str(getattr(stream, 'dtype', 'float32'))}
+                capture_end = None
                 with self._lock:
                     if self._stop.is_set():
                         return
@@ -388,19 +409,31 @@ class AudioMonitor(QObject):
                 while not self._stop.is_set():
                     samples, overflow = stream.read(size)
                     now = self.clock.monotonic()
+                    duration = len(samples)/actual_rate
+                    # A blocking read supplies a sequential sample chunk, not
+                    # a UI tick. Anchor to the queued-frame age, then advance
+                    # by actual frame count so scheduler jitter adds no time.
+                    available = max(0, int(getattr(stream, 'read_available', 0)))
+                    observed_end = now-available/actual_rate
+                    capture_end = (observed_end if capture_end is None or overflow else
+                                   min(observed_end, capture_end+duration))
+                    stale = now-capture_end > .5
                     emit_level = None
                     with self._lock:
                         # A device read may finish after bounded stop() returned.
                         # Never publish its late frame or resurrect availability.
                         if self._stop.is_set():
                             return
-                        if overflow:
-                            self._detector.reset("Audio overflow; retry microphone check")
-                            self._observations.append(AudioObservation(now, False, 0., None, False))
-                            self._status = {"state": "calibrating", "reason": "Audio overflow; resetting ambient baseline"}
+                        if overflow or stale:
+                            reason = "Audio overflow; retry microphone check" if overflow else "Audio buffer is stale; retry microphone check"
+                            self._detector.reset(reason)
+                            self._observations.append(AudioObservation(capture_end, False, 0., None, False, duration))
+                            self._status = {"state": "calibrating", "reason": reason}
+                            capture_end = None  # Re-anchor after an explicit discontinuity.
                             emit_level = 0.
                         else:
-                            observation = self._detector.observe(samples, now)
+                            self.stream_format['dtype'] = str(np.asarray(samples).dtype)
+                            observation = self._detector.observe(samples, capture_end, actual_rate)
                             if observation is not None:
                                 self._observations.append(observation)
                                 if observation.baseline is not None:

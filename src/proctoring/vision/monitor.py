@@ -111,13 +111,15 @@ class RealMonitor:
         now = self.clock.monotonic()
         with self._lock:
             return bool(self._identity_can_capture and not self._exam_active and not self.stopped
+                        and not self._switching and not self._selection_error
                         and self._camera.error is None
                         and self._worker_error is None and self._latest_face_timestamp is not None
                         and 0 <= now - self._latest_face_timestamp < self.config.frame_stale_seconds)
 
     def request_identity_baseline(self) -> bool:
         with self._lock:
-            if self._identity_verifier is None or self._exam_active:
+            if (self._identity_verifier is None or self._exam_active or self.stopped
+                    or self._switching or self._selection_error):
                 return False
             self._identity_requested = True
             self._identity_requested_after = self.clock.monotonic()
@@ -134,6 +136,8 @@ class RealMonitor:
     def _optional_observations(self, frame, measurement, timestamp):
         """Optional failures reduce that detector's availability, never health."""
         with self._lock:
+            if self.stopped or self._switching:
+                return IdentityObservation(), AccessoryObservation()
             verifier = self._identity_verifier
             requested = self._identity_requested and timestamp >= self._identity_requested_after
             generation = self._identity_generation
@@ -155,8 +159,14 @@ class RealMonitor:
                 if requested and not active:
                     baseline = verifier.capture_baseline(frame, measurement, timestamp)
                     with self._lock:
-                        if generation == self._identity_generation and not self._exam_active:
+                        if (generation == self._identity_generation and not self._exam_active
+                                and not self.stopped and not self._switching):
                             self._identity_baseline = baseline
+                        else:
+                            # capture_baseline also stores a reference inside the
+                            # verifier. A camera change must invalidate both copies.
+                            verifier.baseline = None
+                            verifier.reset_checks()
                     identity = IdentityObservation(status="Reference captured; shape consistency is not identity authentication")
                 elif active:
                     identity = verifier.observe(measurement, timestamp)
@@ -171,8 +181,9 @@ class RealMonitor:
             identity = IdentityObservation(status=(str(error) if isinstance(error, ValueError)
                                                    else "Identity comparison unavailable"))
         with self._lock:
-            self._identity_status = identity.status
-            self._identity_can_capture = can_capture
+            if generation == self._identity_generation and not self.stopped and not self._switching:
+                self._identity_status = identity.status
+                self._identity_can_capture = can_capture
         accessory = AccessoryObservation()
         try:
             if active:
@@ -205,7 +216,7 @@ class RealMonitor:
 
     @property
     def latest_frame(self):
-        if self._switching or self._selection_error:
+        if self.stopped or self._switching or self._selection_error:
             return None
         captured = self._camera.latest
         return captured.image if captured is not None else None
@@ -304,15 +315,40 @@ class RealMonitor:
     def unavailable_selection(self):
         self._selection_error = 'Saved camera unavailable; select another camera'
         self.stop(timeout=0)
+        self._invalidate_camera_dependents()
+
+    def _invalidate_camera_dependents(self):
+        """Clear camera-specific state before an old in-flight capture can finish."""
+        with self._lock:
+            self._latest_result = self._delivered_result = None
+            self._latest_face = self._latest_face_frame = self._latest_face_timestamp = None
+            self._delivered_sequence = self._published_sequence
+            self._identity_generation += 1
+            self._identity_requested = False
+            self._identity_baseline = None
+            self._identity_can_capture = False
+            self._identity_reset_pending = True
+            self._identity_status = ("Reference face not captured" if self._identity_verifier
+                                     else "Identity comparison disabled")
         self.calibration.reset()
 
-    def select_camera(self, device_id):
+    def select_camera(self, device_id, *, activate=True):
+        """Select an exact source; opening remains optional until capture consent.
+
+        Re-selecting an unchanged running/configured source is a no-op. A failed
+        selection can be retried, and a configured source can be activated later.
+        """
         if self._exam_active or self._switching:
+            return False
+        changed = device_id != self.selected_camera_id or self._selection_error is not None
+        running = bool(self._thread and self._thread.is_alive() and not self.stopped)
+        if not changed and (not activate or running):
             return False
         self._switching, self._switch_cancelled = True, False
         self._selection_error = None
         self._stop.set()
-        self.calibration.reset()
+        if changed:
+            self._invalidate_camera_dependents()
         def switch():
             self.stop(timeout=3.)
             if (self._thread and self._thread.is_alive()) or getattr(self._camera, 'alive', False):
@@ -322,22 +358,24 @@ class RealMonitor:
             if self._switch_cancelled:
                 self._switching = False
                 return
-            if device_id:
+            if changed and device_id:
                 from .qt_camera import NamedCamera
                 self._camera_factory = lambda config, clock: NamedCamera(config, clock, device_id)
-            else:
+            elif changed:
                 self._camera_factory = LatestFrameCamera
             self.selected_camera_id = device_id
             with self._lock:
-                self._latest_result = self._delivered_result = None
-                self._latest_face = self._latest_face_frame = self._latest_face_timestamp = None
-                self._identity_baseline = None
-                self._identity_can_capture = False
+                # The old worker is now stopped, so it cannot repopulate its
+                # verifier's internal baseline after this final invalidation.
+                if changed and self._identity_verifier is not None:
+                    self._identity_verifier.baseline = None
+                    self._identity_verifier.reset_checks()
             self._switching = False
-            try:
-                self.start()
-            except Exception as error:
-                self._selection_error = str(error)
+            if activate and not self._switch_cancelled:
+                try:
+                    self.start()
+                except Exception as error:
+                    self._selection_error = str(error)
         self._switch_thread = threading.Thread(target=switch, name='camera-switch', daemon=True)
         self._switch_thread.start()
         return True
@@ -435,11 +473,15 @@ class RealMonitor:
                         began = time.perf_counter()
                         cached_face = face.detect(captured.image, captured.timestamp)
                         face_ms = (time.perf_counter() - began) * 1000
+                        if self.stopped or self._switching:
+                            break
                         optional_identity, optional_accessory = self._optional_observations(
                             captured.image, cached_face, captured.timestamp)
                         last_face_sequence = captured.sequence
                         next_face_at = self.clock.monotonic() + 1 / self.config.face_fps
                         with self._lock:
+                            if self.stopped or self._switching:
+                                break
                             self._latest_face = cached_face
                             self._latest_face_timestamp = captured.timestamp
                             self._latest_face_frame = captured.image if self.config.calibration_debug else None
@@ -449,6 +491,8 @@ class RealMonitor:
                         began = time.perf_counter()
                         persons, phones = yolo.detect(captured.image)
                         yolo_ms = (time.perf_counter() - began) * 1000
+                        if self.stopped or self._switching:
+                            break
                         last_yolo_sequence = captured.sequence
                         completed_at = self.clock.monotonic()
                         next_yolo_at = completed_at + 1 / self.config.yolo_fps
@@ -462,6 +506,8 @@ class RealMonitor:
                                          earphone_suspected=optional_accessory.suspected,
                                          earphone_status=optional_accessory.status)
                         with self._lock:
+                            if self.stopped or self._switching:
+                                break
                             self._latest_result = result
                             self._published_sequence += 1
                             self._yolo_latency_ms = yolo_ms
@@ -472,6 +518,8 @@ class RealMonitor:
                             self._worker_error_at = None
                     self._stop.wait(.005)
                 except Exception as error:
+                    if self.stopped or self._switching:
+                        break
                     self._fail(error)
                     self._close(face)
                     self._close(yolo)

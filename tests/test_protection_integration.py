@@ -120,6 +120,42 @@ def test_enabled_protection_requires_camera_mode(tmp_path):
     assert app.store is None
 
 
+def test_electron_retained_helper_death_ends_controller_before_next_monitor_tick(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from proctoring.security.electron import ElectronProtection
+    from proctoring.security.settings import ProtectionConfig
+    config=replace(load_config(),sessions_dir=tmp_path,snapshots_enabled=False)
+    clock=FakeClock(); protection=ElectronProtection(ProtectionConfig(enabled=True))
+    monitor=CameraMonitor(config.vision,clock)
+    owner=SimpleNamespace(handle=object(),pid=8765,living=True)
+    owner.alive=lambda:owner.living
+    protection._helper_process=owner
+    # Real adapter and controller lifecycle; only native arm is replaced.
+    # No process/pipe EOF callback arrives when the retained owner exits.
+    def arm():
+        protection._consume({'kind':'status','status':'ACTIVE','reason':None,
+            'armed':True,'blocking_enabled':True,'hook_installed':True,'hotkey_registered':True,
+            'prepared':True,'control_confirmed':True,'control_sequence':1})
+    monkeypatch.setattr(protection,'arm',arm)
+    app=AppController(config,clock,mode='camera',monitor=monitor,protection=protection)
+    app.start(); assert app.session.running
+    clock.advance(.25); app.step()
+    monitor_calls=[]; timer_calls=[]
+    monkeypatch.setattr(monitor,'sample',lambda now:monitor_calls.append(now))
+    monkeypatch.setattr(app.session,'tick',lambda:timer_calls.append(True))
+    owner.living=False; clock.advance(.1); app.step()
+    assert app.session.ended and not app.session.running and monitor.stopped
+    assert app.session.end_reason=='helper_exited' and app.summary['end_reason']=='helper_exited'
+    assert not monitor_calls and not timer_calls
+    assert protection.public_state()['state']=='fault' and protection.diagnostics['termination_confirmed']
+    events=[item for item in app.security_events if item['event_type']=='PROTECTION_RECOVERY']
+    assert len(events)==1 and events[0]['details']['reason']=='helper_exited'
+    elapsed=app.session.elapsed_seconds
+    clock.advance(30); app.step()
+    assert app.session.elapsed_seconds==elapsed and not monitor_calls and not timer_calls
+    assert len([item for item in app.security_events if item['event_type']=='PROTECTION_RECOVERY'])==1
+
+
 @pytest.mark.parametrize("missing", ["health", "calibration"])
 def test_protection_is_not_armed_until_health_and_calibration_succeed(protected_controller, missing):
     _, app, protection = protected_controller
@@ -184,6 +220,7 @@ def test_release_precedes_monitor_shutdown_and_evidence_finalization(protected_c
 
     def stop():
         assert not protection.armed
+        assert app.session.ended
         calls.append("stop")
         original_stop()
 
@@ -234,6 +271,35 @@ def test_security_event_is_immediate_deduplicated_and_saved_without_pausing(prot
     assert "2468" not in (app.store.path / "config.json").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize('failure', ['metadata', 'audio'])
+def test_partial_start_records_terminal_failure_before_driver_cleanup(protected_controller, monkeypatch, failure):
+    clock, app, protection = protected_controller
+    store = app._ensure_store()
+    if failure == 'metadata':
+        monkeypatch.setattr(store, 'update_metadata', lambda _: (_ for _ in ()).throw(OSError('test metadata write failed')))
+    else:
+        class BrokenAudio:
+            check_status = {}
+            def begin_exam(self):
+                raise RuntimeError('test audio start failed')
+            def stop(self):
+                assert app.session.ended and not protection.armed
+        app.audio = BrokenAudio()
+    original_stop = app.monitor.stop
+    def slow_stop():
+        assert app.session.ended and not protection.armed
+        assert 'startup_failure' in (store.path / 'events.jsonl').read_text(encoding='utf-8')
+        clock.advance(2.)
+        original_stop()
+    monkeypatch.setattr(app.monitor, 'stop', slow_stop)
+    with pytest.raises((OSError, RuntimeError), match='test .* failed'):
+        app.start()
+    assert app.store is store and app.session.end_reason == 'startup_failure'
+    assert app.session.elapsed_seconds == 0.
+    assert app.summary['end_reason'] == 'startup_failure'
+    assert json.loads((store.path / 'summary.json').read_text(encoding='utf-8'))['end_reason'] == 'startup_failure'
+
+
 @pytest.mark.parametrize("pause", [False, True])
 def test_helper_recovery_ends_session_before_cv_and_never_rearms(protected_controller, monkeypatch, pause):
     _, app, protection = protected_controller
@@ -256,6 +322,20 @@ def test_only_ui_ticks_send_main_application_heartbeats(protected_controller):
     clock.advance(.1)
     app.step()
     assert protection.heartbeat_count == 0
+
+
+def test_containment_failure_ends_exam_stops_timer_and_cannot_rearm(protected_controller):
+    clock,app,protection=protected_controller
+    app.start(); clock.advance(1.); app.step()
+    protection.recover('foreground_containment_failed'); app.step()
+    assert app.session.ended and not app.session.running and not protection.armed
+    assert app.session.end_reason=='foreground_containment_failed'
+    assert app.summary['end_reason']=='foreground_containment_failed'
+    assert app.summary['event_counts']['PROTECTION_RECOVERY']==1
+    elapsed=app.session.elapsed_seconds
+    clock.advance(30.); app.step()
+    assert app.session.elapsed_seconds==elapsed and protection.arm_count==1
+    with pytest.raises(RuntimeError): app.start()
 
 
 def test_helper_emergency_event_does_not_add_duplicate_fallback_record(protected_controller):

@@ -154,17 +154,54 @@ def assert_released(status: dict):
     assert status.get("hotkey_registered") is False, status
 
 
-def inject_emergency_chord():
+def inject_emergency_chord(*, verified_binding=None):
     """Exercise RegisterHotKey/WH_KEYBOARD_LL, never a helper RPC stand-in."""
+    _inject_keys([0x11, 0x10, 0x12, 0x51], verified_binding=verified_binding)
+
+
+def _scan_key_fields(key, mapped):
+    """MAPVK_VK_TO_VSC_EX -> physical KEYBDINPUT, for fixed audit keys only.
+
+    Microsoft KEYBDINPUT documents SCANCODE as the physical key identity and
+    EXTENDEDKEY as the E0 prefix. A zero scan is not a valid physical probe.
+    https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-keybdinput
+    """
+    if type(mapped) is not int or not mapped & 0xff or mapped >> 8 not in (0, 0xe0):
+        raise RuntimeError(f"Cannot map owned audit virtual key {key:#x} to a supported scan code")
+    # VK_INSERT can map to bare 0x52 on this Windows layout even in EX mode.
+    # Our named Insert is the dedicated navigation key, not keypad 0/Insert;
+    # Windows documents that key as extended (E0). Preserve that distinction.
+    # MAPVK can also return legacy SysRq 0x54 for VK_SNAPSHOT. Use the
+    # documented physical PrintScreen make code E037 for our named probe.
+    if key == 0x2c:
+        mapped = 0xe037
+    extended = mapped >> 8 == 0xe0 or key == 0x2d
+    return {"wVk": 0, "wScan": mapped & 0xff,
+            "dwFlags": 0x0008 | (0x0001 if extended else 0)}
+
+
+def _inject_keys(keys, *, verified_binding=None):
+    """Private primitive shared by owned recovery/protected fixtures only."""
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
     user32.GetAsyncKeyState.restype = ctypes.c_short
     user32.GetForegroundWindow.restype = wintypes.HWND
-    if window_pid(user32.GetForegroundWindow()) != os.getpid():
+    foreground=int(user32.GetForegroundWindow() or 0)
+    allowed=(verified_binding.valid() and verified_binding.allows(foreground)
+             and window_pid(foreground)==verified_binding.pid) if verified_binding is not None else window_pid(foreground)==os.getpid()
+    if not allowed:
         raise RuntimeError("Recovery audit refused input: the foreground window does not belong to this audit")
-    keys = [0x11, 0x10, 0x12, 0x51]  # Ctrl, Shift, Alt, Q
-    if any(user32.GetAsyncKeyState(key) & 0x8000 for key in keys):
-        raise RuntimeError("Recovery audit deferred: release Ctrl, Shift, Alt and Q before rerunning")
+    if any(user32.GetAsyncKeyState(key) & 0x8000 for key in set(keys)|{0x11,0x10,0x12,0x5b,0x5c}):
+        raise RuntimeError("Recovery audit deferred: release physical modifiers and test keys before rerunning")
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.GetKeyboardLayout.argtypes = [wintypes.DWORD]
+    user32.GetKeyboardLayout.restype = wintypes.HANDLE
+    user32.MapVirtualKeyExW.argtypes = [wintypes.UINT, wintypes.UINT, wintypes.HANDLE]
+    user32.MapVirtualKeyExW.restype = wintypes.UINT
+    pid = wintypes.DWORD()
+    layout = user32.GetKeyboardLayout(user32.GetWindowThreadProcessId(foreground, ctypes.byref(pid)))
+    fields = [_scan_key_fields(key, int(user32.MapVirtualKeyExW(key, 4, layout))) for key in keys]
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
@@ -186,8 +223,8 @@ def inject_emergency_chord():
         _anonymous_ = ("event",)
         _fields_ = [("type", wintypes.DWORD), ("event", UNION)]
 
-    events = [INPUT(type=1, ki=KEYBDINPUT(wVk=key)) for key in keys]
-    events += [INPUT(type=1, ki=KEYBDINPUT(wVk=key, dwFlags=2)) for key in reversed(keys)]
+    events = [INPUT(type=1, ki=KEYBDINPUT(**field)) for field in fields]
+    events += [INPUT(type=1, ki=KEYBDINPUT(**{**field, "dwFlags": field["dwFlags"] | 2})) for field in reversed(fields)]
     batch = (INPUT * len(events))(*events)
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
     user32.SendInput.restype = wintypes.UINT
@@ -197,6 +234,10 @@ def inject_emergency_chord():
         releases = (INPUT * len(keys))(*events[len(keys):])
         user32.SendInput(len(keys), releases, ctypes.sizeof(INPUT))
         raise RuntimeError(f"SendInput sent {sent}/{len(events)} emergency key events")
+    return {"sent_events": int(sent), "foreground_hwnd": hex(foreground),
+            "modifiers_clear_before": True,
+            "keys": [{"virtual_key": key, "scan_code": field["wScan"], "flags": field["dwFlags"]}
+                     for key, field in zip(keys, fields)]}
 
 
 def window_pid(hwnd: int) -> int:

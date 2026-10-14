@@ -8,6 +8,7 @@ its hooks if a native release operation fails.
 import ctypes
 from ctypes import wintypes
 import os
+import time
 from typing import Callable
 
 from .policy import KeyboardPolicy, ModifierState, WindowPolicy
@@ -41,9 +42,11 @@ class ParentProcess:
 
 class WindowsBackend:
     HOTKEY_ID = 0x4D51
+    FOREGROUND_FAILURE_SECONDS = 1.0
 
     def __init__(self, pid: int, hwnd: int, blocking: bool,
-                 on_event: Callable[[str, dict], None], on_emergency: Callable[[], None]):
+                 on_event: Callable[[str, dict], None], on_emergency: Callable[[], None], *,
+                 host_binding=None, desktop_lock_owned=False, clock=time.monotonic):
         if os.name != "nt":
             raise OSError("Windows protection is available only on Windows")
         self.pid, self.hwnd, self.blocking = pid, hwnd, blocking
@@ -51,11 +54,18 @@ class WindowsBackend:
         self.keyboard = KeyboardPolicy(blocking)
         self.modifiers = ModifierState()
         self.windows = WindowPolicy(pid)
+        self.host_binding = host_binding
+        self.desktop_lock_owned = desktop_lock_owned
+        self._desktop_lock = None
+        self._identity_native = None
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         self.hook = None
         self.hotkey_registered = False
         self._last_allowed = hwnd
+        self._clock = clock
+        self._foreign_since = None
+        self._foreground_attempts = 0
         self._configure()
 
     @property
@@ -113,8 +123,14 @@ class WindowsBackend:
         return pid.value
 
     def enable(self) -> None:
+        if self.host_binding is not None and not self.host_binding.valid():
+            raise ValueError('Electron native binding is no longer valid')
         if not self.user32.IsWindow(self.hwnd) or self.window_pid(self.hwnd) != self.pid:
             raise ValueError("Exam HWND must belong to the exact approved parent process")
+        if not self.desktop_lock_owned:
+            from .electron_binding import NativeIdentity
+            self._identity_native = NativeIdentity()
+            self._desktop_lock = self._identity_native.desktop_mutex()
         self._callback = self._hook_type(self._keyboard_callback)
         # Seed held modifiers outside the callback. LowLevelKeyboardProc runs
         # before Windows updates async key state; thereafter track transitions.
@@ -159,6 +175,9 @@ class WindowsBackend:
             # can be swallowed by ctypes callbacks; process teardown instead
             # guarantees Windows removes this helper's remaining resources.
             os._exit(4)
+        if self._desktop_lock:
+            self._identity_native.release_mutex(self._desktop_lock)
+            self._desktop_lock = None
 
     def _keyboard_callback(self, code: int, message: int, pointer: int) -> int:
         if code < 0:
@@ -201,26 +220,69 @@ class WindowsBackend:
 
     def poll_foreground(self) -> None:
         if not self.hook:
+            self._foreign_since = None
+            self._foreground_attempts = 0
             return
         hwnd = int(self.user32.GetForegroundWindow() or 0)
         if not hwnd:
-            return  # Secure desktop / no foreground window: do not interfere.
+            # No secure-desktop action. Preserve an existing loss deadline: a
+            # transient NULL during foreign switches is not confirmed recovery.
+            return
         pid = self.window_pid(hwnd)
-        if self.windows.allowed(pid):
+        allowed = self.host_binding.allows(hwnd) if self.host_binding else self.windows.allowed(pid)
+        if allowed:
             self._last_allowed = hwnd
+            self._foreign_since = None
+            self._foreground_attempts = 0
             self.windows.should_report(hwnd, pid)
             return
-        if self.windows.should_report(hwnd, pid):
+        if self.windows.should_report(hwnd, pid, allowed=False if self.host_binding else None):
             self.on_event("UNAUTHORIZED_WINDOW", {
                 "hwnd": hwnd, "pid": pid, "audit": not self.blocking,
                 "action": "foreground_switch"})
         if not self.blocking:
+            self._foreign_since = None
+            self._foreground_attempts = 0
             return
+        now = self._clock()
+        if self._foreign_since is None:
+            self._foreign_since = now
+        self._foreground_attempts += 1
         target = self._last_allowed
-        if not self.user32.IsWindowVisible(target) or self.window_pid(target) != self.pid:
+        if (not self.user32.IsWindowVisible(target) or self.window_pid(target) != self.pid or
+                (self.host_binding and not self.host_binding.allows(target))):
             target = self.hwnd
-        if self.user32.IsWindow(target) and self.window_pid(target) == self.pid:
+        foreground_requested = False
+        if (self.user32.IsWindow(target) and self.window_pid(target) == self.pid and
+                (not self.host_binding or self.host_binding.allows(target))):
             if self.user32.IsIconic(target):
                 self.user32.ShowWindow(target, 9)  # SW_RESTORE
             # Windows may legitimately refuse this. Never attach to other threads.
-            self.user32.SetForegroundWindow(target)
+            foreground_requested = bool(self.user32.SetForegroundWindow(target))
+        # A successful BOOL is not proof that this HWND remains foreground.
+        # The uninterrupted outage only clears after observing an allowed window.
+        current = int(self.user32.GetForegroundWindow() or 0)
+        if not current:
+            return
+        current_pid = self.window_pid(current)
+        current_allowed = self.host_binding.allows(current) if self.host_binding else self.windows.allowed(current_pid)
+        if current_allowed:
+            self._last_allowed = current
+            self._foreign_since = None
+            self._foreground_attempts = 0
+            self.windows.should_report(current, current_pid)
+            return
+        elapsed = self._clock() - self._foreign_since
+        if elapsed >= self.FOREGROUND_FAILURE_SECONDS:
+            # Remove native restrictions before evidence/IPC or media cleanup.
+            # The helper's existing recovery path makes the exam terminal; it
+            # must not keep claiming protected operation in another application.
+            attempts = self._foreground_attempts
+            self.release()
+            self.on_event('PROTECTION_RECOVERY', {
+                'reason': 'foreground_containment_failed', 'elapsed_seconds': elapsed,
+                'attempts': attempts,
+                'set_foreground_returned': foreground_requested,
+                'hwnd': current, 'pid': current_pid, 'target_hwnd': target,
+                'failure_bound_seconds': self.FOREGROUND_FAILURE_SECONDS,
+            })

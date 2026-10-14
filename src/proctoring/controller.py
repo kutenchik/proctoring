@@ -52,6 +52,7 @@ class AppController:
         self.store: SessionStore | None = None
         self.summary: dict | None = None
         self.storage_error: str | None = None
+        self.connected_attempt: dict | None = None
         self._record_cursor = 0
         self._last_sample: float | None = None
         self._recovery_sample_after = float("-inf")
@@ -69,6 +70,7 @@ class AppController:
         self._device_info = {}
         self._optional_closed = False
         self.device_selection_ready = True
+        self._camera_preview_allowed = False
         self._report_job = None
         self.audio = None
         self.audio_events = None
@@ -86,7 +88,8 @@ class AppController:
             from .audio.monitor import AudioMonitor
             self.audio = AudioMonitor(config.audio, self.clock)
             self.audio_events = EventEngine({EventType.VOICE_DETECTED: config.audio.voice_duration_threshold},
-                                           config.clearing_seconds, self.clock, max_observation_gap=.5)
+                                           config.clearing_seconds, self.clock, max_observation_gap=.5,
+                                           accumulate_sample_durations=True)
         self.remote = None
         if config.remote.enabled:
             from .storage.remote_dispatcher import RemoteDispatcher
@@ -133,10 +136,45 @@ class AppController:
         if self.session.started:
             raise RuntimeError("Exam already started")
         self.register_candidate(info)
+        self.prepare_camera_preview()
+
+    def prepare_camera_preview(self) -> None:
+        """Explicit camera activation before registration, without saving a photo."""
+        if self.mode != "camera" or self.session.started:
+            raise RuntimeError("Camera testing is available before the exam")
+        if not self.device_selection_ready:
+            raise RuntimeError("Wait for device selection to finish")
+        self._camera_preview_allowed = True
         self.monitor.start()
 
+    def select_camera(self, device_id) -> bool:
+        if self.session.started:
+            return False
+        previous = getattr(self.monitor, "selected_camera_id", None)
+        changed = self.monitor.select_camera(device_id, activate=self._camera_preview_allowed)
+        if changed and previous != device_id:
+            self._invalidate_camera_reference()
+        return changed
+
+    def camera_unavailable(self) -> None:
+        if not self.session.started:
+            self.monitor.unavailable_selection()
+            self._invalidate_camera_reference()
+
+    def _invalidate_camera_reference(self) -> None:
+        self._baseline_saved = None
+        self._identity_save_error = ""
+        # Keep the local file as historical data; it cannot authorize an exam.
+        if self.store is not None:
+            try:
+                self.store.update_metadata({"reference_face": None, "identity_reference": None,
+                                            "identity_reference_invalidated": "camera_changed"})
+            except OSError as error:
+                self.storage_error = str(error)
+                self._identity_save_error = "Reference invalidated; local metadata could not be updated"
+
     def capture_identity_baseline(self) -> None:
-        if not self.identity_can_capture or self.session.candidate is None:
+        if not self.identity_can_capture or (self.config.registration.enabled and self.session.candidate is None):
             raise RuntimeError("A fresh, single, frontal face is required for the baseline photo")
         self._identity_save_error = ""
         self.monitor.request_identity_baseline()
@@ -176,16 +214,63 @@ class AppController:
                     "committed_recommended_threshold", 'gain', 'device_key', 'stream_format',
                     'speech_rms_raw', 'ambient_rms_raw', 'calibration_peak_raw') if key in check}}
 
+    def audio_debug_status(self) -> dict:
+        """Small numerical view of the existing worker/engine; no media or secrets."""
+        audio = self.audio
+        check = getattr(audio, 'check_status', {}) if audio is not None else {}
+        timestamp = check.get('timestamp')
+        thread = getattr(audio, '_thread', None)
+        engine = self.audio_events
+        return {
+            'config_path': str(self.config.source_path) if self.config.source_path else None,
+            'audio_enabled': self.config.audio.enabled,
+            'session_state': ('ended' if self.session.ended else 'setup' if not self.session.started
+                              else 'running' if self.session.running else 'paused'),
+            'selected_microphone': getattr(getattr(audio, 'selection', None), 'label', 'system-default'),
+            'resolved_microphone': check.get('resolved_device'),
+            'stream_format': check.get('stream_format', {}),
+            'worker_running': bool(thread is not None and thread.is_alive()),
+            'buffer_age_seconds': None if timestamp is None else max(0., self.clock.monotonic()-timestamp),
+            'gain': check.get('gain'), 'applied_gain': check.get('applied_gain'),
+            'processed_rms': check.get('rms'), 'threshold': check.get('committed_threshold'),
+            'threshold_source': check.get('threshold_source'),
+            'candidate_duration_seconds': engine.candidate_duration(EventType.VOICE_DETECTED) if engine else 0.,
+            'required_duration_seconds': self.config.audio.voice_duration_threshold,
+            'event_state': engine.states[EventType.VOICE_DETECTED] if engine else 'disabled',
+            'reset_or_clear_reason': engine.last_reset_reason if engine else None,
+            'activated_event_count': len(engine.events) if engine else 0,
+        }
+
     @property
     def report_status(self) -> str:
-        return self._report_job.status if self._report_job is not None else "disabled"
+        return self._report_job.status if self._report_job is not None else getattr(self, '_restored_report_status', 'disabled')
+
+    def retry_report(self) -> bool:
+        """Retry only failed local generation; successful reports are not resent."""
+        if (self.summary is None or self.store is None or not self.config.reporting.generate_pdf_report
+                or self.report_status != 'failed'):
+            return False
+        self._start_report_job()
+        return True
+
+    def _start_report_job(self) -> None:
+        from .storage.report_generator import ReportJob
+        def report_complete(result):
+            if (result.path is not None and self.config.reporting.send_pdf_to_telegram
+                    and self.config.remote.enabled and self.config.remote.telegram_enabled):
+                self._enqueue_remote('session_report', self._remote_payload(
+                    trust_score=result.trust_score, total_events=self.summary['event_count']), document_path=result.path)
+        self._report_job = ReportJob(self.store.path, self.summary, self.config.reporting, report_complete)
 
     def _ensure_store(self):
         if self.store is None:
-            store = SessionStore(self.config.sessions_dir, self.clock, candidate=self.candidate_info or {})
+            store = SessionStore(self.config.sessions_dir, self.clock, candidate=self.candidate_info or {},
+                                 session_id=getattr(self, 'connected_session_id', None))
             try:
                 store.save_config({**self.config.public_dict(), "mode": self.mode,
                                    "snapshots_available": self.mode == "camera"})
+                if self.connected_attempt:
+                    store.update_metadata({"connected_attempt": self.connected_attempt})
             except Exception:
                 store.close()
                 raise
@@ -200,6 +285,7 @@ class AppController:
             if baseline is not None and baseline is not self._baseline_saved:
                 try:
                     self._ensure_store().save_reference(baseline.jpeg_bytes, baseline.metadata)
+                    self.store.update_metadata({"identity_reference_invalidated": None})
                     self._baseline_saved = baseline
                     self._identity_save_error = ""
                 except (OSError, ValueError) as error:
@@ -224,17 +310,22 @@ class AppController:
             for sample in self.audio.drain():
                 # Calibration speech and queued preview buffers must never seed
                 # the exam's two-second review-event accumulator.
+                duration = getattr(sample, 'duration_seconds', None)
+                interval_start = sample.timestamp - (duration or 0.0)
                 if (self._audio_exam_started_at is not None
-                        and sample.timestamp < self._audio_exam_started_at):
+                        and interval_start < self._audio_exam_started_at - 1e-9):
                     continue
                 camera_healthy = (self.mode != "camera" or self.monitor.health(self.clock.monotonic()).healthy)
                 if (not sample.healthy or not camera_healthy or not self.session.monitoring_healthy
                         or self.clock.monotonic() - sample.timestamp > .5):
-                    changes = self.audio_events.interrupt("audio_or_camera_unavailable")
+                    reason = ("audio_unhealthy" if not sample.healthy else "audio_stale"
+                              if self.clock.monotonic() - sample.timestamp > .5 else "monitoring_unavailable")
+                    changes = self.audio_events.interrupt(reason)
                 else:
                     conditions = {EventType.VOICE_DETECTED: None} if sample.above_ambient else {}
-                    changes = self.audio_events.observe(Observation(sample.timestamp, conditions, "audio_energy"))
-                    self._last_audio_sample = sample.timestamp
+                    changes = self.audio_events.observe(Observation(sample.timestamp, conditions, "audio_energy", duration))
+                    if self._last_audio_sample is None or sample.timestamp > self._last_audio_sample:
+                        self._last_audio_sample = sample.timestamp
                 self._write_audio_events(changes)
             if (state["state"] == "unavailable" or (self._last_audio_sample is not None
                     and self.clock.monotonic() - self._last_audio_sample > .5)):
@@ -299,6 +390,14 @@ class AppController:
         if self.store is None:
             return
         for result in self.store.snapshot_results():
+            metadata = self._event_metadata.get(result["event_id"], {})
+            status = "ready" if result["snapshot_path"] else "unavailable"
+            metadata["snapshot_status"] = status
+            self._append({"record_kind":"snapshot_result", "timestamp":self.clock.wall_time(),
+                          "event_id":result["event_id"], "event_type":metadata.get("event_type"), "start_timestamp":metadata.get("start_timestamp"),
+                          "snapshot_path":result["snapshot_path"], "snapshot_status":status,
+                          "duration_seconds":metadata.get("duration_seconds", 0),
+                          "snapshot_reason":None if result["snapshot_path"] else "production_failed"})
             payload = self._pending_remote_alerts.pop(result["event_id"], None)
             if payload is not None:
                 path = self.store.path / result["snapshot_path"] if result["snapshot_path"] else None
@@ -375,6 +474,7 @@ class AppController:
         if not self.device_selection_ready:
             raise RuntimeError('Wait for the device list before opening the camera')
         if self.mode == "camera" and not self.session.ended:
+            self._camera_preview_allowed = True
             self.monitor.start()
 
     def start(self) -> None:
@@ -405,6 +505,7 @@ class AppController:
             self.protection.arm()
             self._protection_started = self.protection.blocking_enabled
             self.session.start()
+            self._recovery_sample_after = self.clock.monotonic()
             store.update_metadata({"system": {"platform": platform.system(), "release": platform.release(),
                                                "machine": platform.machine(), "python": platform.python_version()},
                                    "screen_count": status.get("screen_count")})
@@ -430,13 +531,26 @@ class AppController:
             self.protection.release("startup_failure")
             if self.system_checker is not None:
                 self.system_checker.stop()
-            if self.audio is not None:
-                self.audio.stop()
             if self.session.started:
-                self.monitor.stop()
                 self.session.end("startup_failure")
-            store.close()
-            self.store = None
+                # Persist the interruption before potentially slow driver cleanup.
+                # Keep the journal/summary inspectable after a partial Start.
+                self._write_session_records()
+                try:
+                    self.end("startup_failure")
+                except Exception as cleanup_error:
+                    self.storage_error = f"Startup cleanup failed: {type(cleanup_error).__name__}"
+                    try:
+                        store.close()
+                    except OSError:
+                        pass
+            else:
+                try:
+                    if self.audio is not None:
+                        self.audio.stop()
+                finally:
+                    store.close()
+                    self.store = None
             raise
 
     def _append(self, record: dict) -> None:
@@ -456,11 +570,20 @@ class AppController:
         for change in changes:
             if change.get("action") == "activated":
                 severity = ("high" if change["event_type"] == EventType.IMPERSONATION_SUSPECTED.value else "review")
-                self._event_metadata[change["event_id"]] = {"severity": severity}
+                self._event_metadata[change["event_id"]] = {"severity": severity, "event_type": change["event_type"], "start_timestamp": change.get("start_timestamp")}
+            if "duration_seconds" in change:
+                self._event_metadata.setdefault(change["event_id"], {})["duration_seconds"] = change["duration_seconds"]
             change = {**change, **self._event_metadata.get(change["event_id"], {})}
             queued_snapshot = False
             if change.get("action") == "activated" and self.mode == "camera" and self.config.snapshots_enabled:
                 queued_snapshot = self._save_snapshot(change)
+                status = "pending" if queued_snapshot else "unavailable"
+                self._event_metadata[change["event_id"]]["snapshot_status"] = status
+                change["snapshot_status"] = status
+                if not queued_snapshot: change["snapshot_reason"] = "capture_unavailable"
+            elif change.get("action") == "activated":
+                change["snapshot_status"] = "disabled" if not self.config.snapshots_enabled else "unavailable"
+                if self.config.snapshots_enabled: change["snapshot_reason"] = "capture_unavailable"
             self._append({"record_kind": "review_event", "timestamp": self.clock.wall_time(),
                           "snapshot_path": self._snapshots.get(change["event_id"]), **change})
             if change.get("action") == "activated" and self.remote is not None:
@@ -590,11 +713,16 @@ class AppController:
         self.protection.release(reason)
         if self.system_checker is not None:
             self.system_checker.stop()
+        # Once restrictions are released, the exam is terminal even if a media
+        # driver blocks during cleanup. Cleanup time must not count as exam time.
+        self.session.end(reason)
+        terminal_hook = getattr(self, 'connected_terminal_hook', None)
+        if terminal_hook is not None:
+            terminal_hook()
         if self.mode == "camera" and hasattr(self.monitor, "set_exam_active"):
             self.monitor.set_exam_active(False)
         self._drain_protection_events()
         self.monitor.stop()
-        self.session.end(reason)
         self._finalize()
 
     def emergency_end(self, reason: str = "emergency_shortcut") -> None:
@@ -612,6 +740,9 @@ class AppController:
         if self.summary is not None or not self.session.started:
             return
         self.protection.release(self.session.end_reason or "session_ended")
+        terminal_hook = getattr(self, 'connected_terminal_hook', None)
+        if terminal_hook is not None:
+            terminal_hook()
         if self.system_checker is not None:
             self.system_checker.stop()
         if self.audio is not None:
@@ -625,21 +756,30 @@ class AppController:
         self._write_session_records()
         if self.store is not None and self.mode == "camera":
             paths, errors = self.store.finish_snapshots()
-            self._snapshots = paths
+            self._snapshots = {**self._snapshots, **paths}
             self.snapshot_errors.extend(errors)
         self._drain_snapshot_results(final=True)
         events = [{**event, "snapshot_path": self._snapshots.get(event["event_id"])}
                   for event in self.review_events]
+        ended_at = self.clock.wall_time()
+        if self.connected_attempt:
+            # Finalizing an interrupted terminal write on a later launch must
+            # retain actual completion time (including retention provenance).
+            ended_at = next((record['timestamp'] for record in reversed(self.session.records)
+                             if record.get('event_type') == 'session_ended'), ended_at)
         self.summary = {
-            "mode": self.mode, "ended_at": self.clock.wall_time(),
+            "mode": self.mode, "ended_at": ended_at,
             "end_reason": self.session.end_reason, "score": self.quiz.score,
             "total_questions": self.quiz.total, "answered": self.quiz.answered_count,
             "answers": self.quiz.answers, "elapsed_seconds": self.session.elapsed_seconds,
             "remaining_seconds": self.session.remaining_seconds,
+            "duration_seconds": self.session.duration_seconds,
+            "time_adjustment_ids": list(self.session.time_adjustment_ids),
             "event_count": len(events), "event_counts": dict(Counter(e["event_type"] for e in events)),
             "events": events, "security_events": list(self.security_events), "lifecycle": self.session.records,
             "session_id": self.store.path.name if self.store else None,
             "candidate": self.candidate_info or {},
+            **({"connected_attempt": self.connected_attempt} if self.connected_attempt else {}),
             "snapshots_available": self.mode == "camera",
             "blocking_enabled": self.protection.blocking_enabled,
             "snapshot_errors": list(self.snapshot_errors),
@@ -647,7 +787,7 @@ class AppController:
             "system_checks": self._system_metadata or {},
             "optional_monitor_status": dict(self._optional_status),
             "audio_check": dict(self._audio_check_metadata),
-            "reference_face": "reference_face.jpg" if self._baseline_saved is not None else None,
+            "reference_face": self.store._metadata.get('reference_face') if self._baseline_saved is not None and self.store else None,
             "system": {"platform": platform.system(), "release": platform.release(), "machine": platform.machine()},
             "device_info": dict(self._device_info),
         }
@@ -672,11 +812,5 @@ class AppController:
             elapsed_seconds=self.session.elapsed_seconds,
             event_counts=self.summary["event_counts"]))
         if self.config.reporting.generate_pdf_report and self.store is not None and self.storage_error is None:
-            from .storage.report_generator import ReportJob
-            def report_complete(result):
-                if (result.path is not None and self.config.reporting.send_pdf_to_telegram
-                        and self.config.remote.enabled and self.config.remote.telegram_enabled):
-                    self._enqueue_remote("session_report", self._remote_payload(
-                        trust_score=result.trust_score, total_events=len(events)), document_path=result.path)
-            self._report_job = ReportJob(self.store.path, self.summary, self.config.reporting, report_complete)
+            self._start_report_job()
 

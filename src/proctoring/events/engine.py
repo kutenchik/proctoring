@@ -21,6 +21,7 @@ class _Evidence:
     source: str
     clearing_since: float | None = None
     event: dict | None = None
+    positive_seconds: float = 0.0
 
 
 class EventEngine:
@@ -40,6 +41,7 @@ class EventEngine:
         clearing_seconds: float,
         clock: Clock,
         max_observation_gap: float = 2.0,
+        *, accumulate_sample_durations: bool = False,
     ):
         if not thresholds:
             raise ValueError("At least one event threshold is required")
@@ -51,6 +53,8 @@ class EventEngine:
         self.max_observation_gap = float(max_observation_gap)
         self._positive_finite(self.max_observation_gap, "Maximum observation gap")
         self.clock = clock
+        self.accumulate_sample_durations = accumulate_sample_durations
+        self.last_reset_reason: str | None = None
         self._evidence: dict[EventType, _Evidence] = {}
         self._events: list[dict] = []
         self._last_observation: float | None = None
@@ -76,6 +80,13 @@ class EventEngine:
             for kind in self.thresholds
         }
 
+    def candidate_duration(self, kind: EventType) -> float:
+        evidence = self._evidence.get(kind)
+        if evidence is None:
+            return 0.0
+        return (evidence.positive_seconds if self.accumulate_sample_durations
+                else evidence.last_positive - evidence.start)
+
     def observe(self, observation: Observation) -> list[dict]:
         """Process one new sample, ignoring reordered/duplicate/stale evidence.
 
@@ -100,8 +111,24 @@ class EventEngine:
                 raise ValueError("Detection confidence must be between zero and one, or None")
 
         changes: list[dict] = []
+        previous = self._last_observation
         if self._last_observation is not None and timestamp - self._last_observation > self.max_observation_gap:
             changes.extend(self._reset("observation_gap"))
+            previous = None
+        duration = 0.0
+        if self.accumulate_sample_durations:
+            duration = observation.duration_seconds
+            if duration is None:
+                # Compatibility for timestamp-only adapters: never credit a
+                # first sample, a negative sample, or an unknown outage.
+                duration = 0.0 if previous is None else timestamp - previous
+            if not math.isfinite(duration) or not 0 <= duration <= self.max_observation_gap:
+                raise ValueError("Sample duration must be finite and within the observation freshness limit")
+            if previous is not None:
+                duration = min(duration, timestamp - previous)
+            # A buffer straddling a health interruption cannot resurrect audio
+            # captured before the interruption barrier.
+            duration = min(duration, max(0.0, timestamp-self._minimum_timestamp))
         self._last_observation = timestamp
         wall_timestamp = self.clock.wall_time()
 
@@ -110,22 +137,34 @@ class EventEngine:
             # An expired clearing period closes even if this sample is positive.
             # A fresh candidate then starts; unseen time cannot bridge the gap.
             if evidence is not None and evidence.clearing_since is not None:
-                if timestamp - evidence.clearing_since >= self.clearing_seconds:
-                    changes.append(self._close(kind, evidence, "condition_cleared", wall_timestamp))
+                clear_at = (timestamp-duration if self.accumulate_sample_durations
+                            and evidence.event is None and kind in conditions else timestamp)
+                tolerance = 1e-9 if self.accumulate_sample_durations else 0.0
+                if clear_at - evidence.clearing_since >= self.clearing_seconds - tolerance:
+                    if evidence.event is not None:
+                        changes.append(self._close(kind, evidence, "condition_cleared", wall_timestamp))
+                    else:
+                        del self._evidence[kind]
+                    self.last_reset_reason = "condition_cleared"
                     evidence = None
 
             if kind in conditions:
                 confidence = conditions[kind]
                 if evidence is None:
-                    self._evidence[kind] = _Evidence(timestamp, wall_timestamp, timestamp, confidence, observation.source)
-                    continue
+                    evidence = _Evidence(timestamp-duration, wall_timestamp, timestamp, confidence, observation.source)
+                    self._evidence[kind] = evidence
+                    if not self.accumulate_sample_durations:
+                        continue
+                evidence.positive_seconds += duration
                 evidence.last_positive = timestamp
                 evidence.source = observation.source
                 if confidence is not None:
                     evidence.confidence = confidence if evidence.confidence is None else max(evidence.confidence, confidence)
                 evidence.clearing_since = None
                 if evidence.event is None:
-                    if timestamp - evidence.start >= threshold:
+                    qualifying = (evidence.positive_seconds if self.accumulate_sample_durations
+                                  else timestamp - evidence.start)
+                    if qualifying >= threshold - (1e-9 if self.accumulate_sample_durations else 0):
                         evidence.event = {
                             "event_id": f"event-{len(self._events) + 1:06d}",
                             "event_type": kind.value,
@@ -139,6 +178,8 @@ class EventEngine:
                             "source": evidence.source,
                             "close_reason": None,
                         }
+                        if self.accumulate_sample_durations:
+                            evidence.event["activity_seconds"] = evidence.positive_seconds
                         self._events.append(evidence.event)
                         changes.append(self._change(evidence.event, "activated"))
                 else:
@@ -148,10 +189,17 @@ class EventEngine:
                         confidence=evidence.confidence,
                         source=evidence.source,
                     )
+                    if self.accumulate_sample_durations:
+                        evidence.event["activity_seconds"] = evidence.positive_seconds
                     changes.append(self._change(evidence.event, "updated"))
             elif evidence is not None:
                 if evidence.event is None:
-                    del self._evidence[kind]
+                    if self.accumulate_sample_durations:
+                        if evidence.clearing_since is None:
+                            evidence.clearing_since = timestamp-duration
+                            self.last_reset_reason = "below_threshold_gap"
+                    else:
+                        del self._evidence[kind]
                 elif evidence.clearing_since is None:
                     evidence.clearing_since = timestamp
                     evidence.event["state"] = "clearing"
@@ -174,6 +222,7 @@ class EventEngine:
         return self._change(evidence.event, "closed")
 
     def _reset(self, reason: str) -> list[dict]:
+        self.last_reset_reason = reason
         changes = []
         wall_timestamp = self.clock.wall_time()
         for kind, evidence in list(self._evidence.items()):

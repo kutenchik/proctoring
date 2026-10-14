@@ -110,8 +110,8 @@ class WindowPolicy:
     def allowed(self, pid: int) -> bool:
         return pid == self.parent_pid
 
-    def should_report(self, hwnd: int, pid: int) -> bool:
-        if not hwnd or self.allowed(pid):
+    def should_report(self, hwnd: int, pid: int, *, allowed: bool | None = None) -> bool:
+        if not hwnd or (self.allowed(pid) if allowed is None else allowed):
             self._last_unauthorized = None
             return False
         report = hwnd != self._last_unauthorized

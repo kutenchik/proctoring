@@ -144,6 +144,12 @@ class SystemIntegrityChecker:
         if not self._active or self._clearing:
             return
         self._require_gui_thread()
+        # A protection helper can release independently while Qt is stalled.
+        # Check its current scope before handling any queued clipboard signal.
+        authorized = getattr(self, 'clipboard_scope_guard', None)
+        if authorized is not None and not authorized():
+            self.stop()
+            return
         mime = self._clipboard.mimeData()
         formats = list(mime.formats()) if mime is not None else []
         # Inspect format availability only: requesting image/custom payloads

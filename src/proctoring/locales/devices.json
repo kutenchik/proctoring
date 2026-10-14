@@ -60,9 +60,9 @@
     "kk": "Калибрлеуден бұрын құрылғыларды таңдаңыз. Ауыстырғаннан кейін қайта калибрлеңіз."
   },
   "devices.camera_changed": {
-    "en": "Switching camera; gaze calibration cleared.",
-    "ru": "Камера переключается; калибровка взгляда сброшена.",
-    "kk": "Камера ауыстырылуда; көзқарас калибрлеуі тазартылды."
+    "en": "Camera changed; the reference photo and gaze calibration must be collected again.",
+    "ru": "Камера изменена; сделайте новое эталонное фото и повторите калибровку взгляда.",
+    "kk": "Камера өзгерді; анықтамалық фотосуретті қайта түсіріп, көзқарасты қайта калибрлеңіз."
   },
   "devices.mic_changed": {
     "en": "Switching microphone; calibrate the new input.",
@@ -143,5 +143,45 @@
     "en": "Microphone format unsupported; choose another input device",
     "ru": "Формат микрофона не поддерживается; выберите другой вход",
     "kk": "Микрофон пішімі қолдау таппайды; басқа кірісті таңдаңыз."
+  },
+  "devices.advanced_audio": {
+    "en": "Advanced audio devices",
+    "ru": "Расширенный выбор аудиоустройств",
+    "kk": "Қосымша аудио құрылғылар"
+  },
+  "devices.rescan_audio": {
+    "en": "Rescan audio hardware (stops microphone test)",
+    "ru": "Обновить аудиоустройства (остановит проверку микрофона)",
+    "kk": "Аудио құрылғыларды қайта іздеу (микрофон тексерісі тоқтайды)"
+  },
+  "devices.default_named": {
+    "en": "System default — {name}",
+    "ru": "Системный по умолчанию — {name}",
+    "kk": "Жүйелік әдепкі — {name}"
+  },
+  "devices.default_unavailable": {
+    "en": "System default — unavailable",
+    "ru": "Системный по умолчанию — недоступен",
+    "kk": "Жүйелік әдепкі — қолжетімсіз"
+  },
+  "devices.cached_audio": {
+    "en": "Microphone test continues. To detect newly connected audio hardware, open Advanced audio devices and rescan (briefly stops the test).",
+    "ru": "Проверка микрофона продолжается. Для поиска недавно подключённых аудиоустройств откройте расширенный выбор и обновите список (проверка ненадолго остановится).",
+    "kk": "Микрофон тексерісі жалғасуда. Жаңа аудио құрылғыларды табу үшін қосымша құрылғыларды ашып, қайта іздеңіз (тексеру қысқа уақытқа тоқтайды)."
+  },
+  "devices.default_changed": {
+    "en": "System default — currently {current}; select to use {next}",
+    "ru": "Системный — сейчас {current}; выберите для перехода на {next}",
+    "kk": "Жүйелік — қазір {current}; {next} пайдалану үшін таңдаңыз"
+  },
+  "devices.previous_input": {
+    "en": "previous input",
+    "ru": "предыдущий вход",
+    "kk": "алдыңғы кіріс"
+  },
+  "devices.unavailable": {
+    "en": "unavailable",
+    "ru": "недоступен",
+    "kk": "қолжетімсіз"
   }
 }

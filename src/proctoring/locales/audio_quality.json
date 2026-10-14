@@ -1,0 +1,32 @@
+{
+  "audio_quality.insufficient_activity": {
+    "en": "No speech-level activity detected. Speak naturally and retry.",
+    "ru": "Активность на уровне речи не обнаружена. Говорите обычным голосом и повторите.",
+    "kk": "Сөйлеу деңгейіндегі белсенділік анықталмады. Қалыпты сөйлеп, қайталаңыз."
+  },
+  "audio_quality.short_activity": {
+    "en": "Not enough speech-level activity detected. Speak a few more words and retry.",
+    "ru": "Недостаточно активности на уровне речи. Произнесите ещё несколько слов и повторите.",
+    "kk": "Сөйлеу деңгейіндегі белсенділік жеткіліксіз. Тағы бірнеше сөз айтып, қайталаңыз."
+  },
+  "audio_quality.contrast": {
+    "en": "Input activity is not sufficiently above background. Reduce noise or move closer and retry.",
+    "ru": "Уровень активности недостаточно выше фона. Уменьшите шум или подвиньтесь ближе и повторите.",
+    "kk": "Белсенділік деңгейі фоннан жеткілікті жоғары емес. Шуды азайтыңыз немесе жақындап, қайталаңыз."
+  },
+  "audio_quality.processed_contrast": {
+    "en": "Noise and activity levels cannot be separated safely. Reduce noise or move closer and retry.",
+    "ru": "Не удалось надёжно разделить фон и активность. Уменьшите шум или подвиньтесь ближе и повторите.",
+    "kk": "Фон мен белсенділік деңгейлерін сенімді ажырату мүмкін емес. Шуды азайтыңыз немесе жақындап, қайталаңыз."
+  },
+  "audio_quality.usable": {
+    "en": "Microphone calibrated. The level is below the preferred target but usable.",
+    "ru": "Микрофон откалиброван. Уровень ниже желаемого, но достаточен для работы.",
+    "kk": "Микрофон калибрленді. Деңгей қалаулы мәннен төмен, бірақ жұмысқа жеткілікті."
+  },
+  "audio_quality.no_fresh": {
+    "en": "Microphone check timed out: no fresh input. Check the selected input and retry.",
+    "ru": "Время проверки истекло: свежие данные не поступают. Проверьте выбранный вход и повторите.",
+    "kk": "Тексеру уақыты аяқталды: жаңа деректер жоқ. Таңдалған кірісті тексеріп, қайталаңыз."
+  }
+}

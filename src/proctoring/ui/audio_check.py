@@ -56,7 +56,7 @@ class AudioLevelMeter(QProgressBar):
 class AudioCheckWidget(QGroupBox):
     """Never opens a second input device or performs microphone I/O in Qt slots.
 
-    The parent starts the shared worker once registration is complete. A 20 Hz
+    An explicit preflight test may start the shared worker before registration. A 20 Hz
     timer coalesces state changes, so queued worker levels cannot flood the UI.
     """
 
@@ -184,9 +184,21 @@ class AudioCheckWidget(QGroupBox):
                 self.status_label.setText(translate_text(self._status['reason']))
             self.calibrate_button.setText(t('devices.calibrate_mic'))
             if self.developer_mode:
+                def number(key):
+                    value = self._status.get(key)
+                    return '—' if value is None else f'{self._finite(value):.6f}'
+                fmt = self._status.get('stream_format') or {}
                 self.level_label.setText(
-                    f"Input RMS {self._status.get('input_rms', 0):.4f} · processed RMS {rms:.4f}\n"
-                    f"Gain {self._status.get('applied_gain', 1):.2f} · threshold {threshold:.4f} (processed RMS)")
+                    f"Input: {self._status.get('resolved_device') or '—'}\n"
+                    f"Format: {fmt.get('sample_rate', '—')} Hz · {fmt.get('channels', '—')} channels · {fmt.get('dtype', '—')}\n"
+                    f"Input RMS {number('input_rms')} · processed RMS {rms:.6f}\n"
+                    f"B {number('ambient_rms_raw')} · S {number('speech_rms_raw')} · P95 {number('calibration_peak_raw')}\n"
+                    f"Maximum peak {number('observed_peak_raw')} · transient excluded: {self._status.get('transient_peak_excluded', False)}\n"
+                    f"Gain proposed {number('proposed_gain')} · committed {number('gain')} · applied {number('applied_gain')}\n"
+                    f"Processed noise {number('processed_noise')} · speech {number('processed_speech')} · threshold {threshold:.6f}\n"
+                    f"Channel {self._status.get('selected_channel', '—')} (zero-based, strongest RMS) · "
+                    f"buffer {number('buffer_duration_seconds')} s\n"
+                    f"Result: {self._status.get('rejection_code') or state}")
             self.level_label.setVisible(self.developer_mode)
             for widget in (self.sensitivity_slider, self.sensitivity_label, self.sensitivity_value):
                 widget.setVisible(self.developer_mode)

@@ -37,7 +37,7 @@ class _Delivery:
 def format_telegram_message(kind: str, payload: dict) -> str:
     """Plain text only: no HTML/Markdown parsing of candidate-supplied names."""
     candidate = payload.get("candidate") or {}
-    name = f"{candidate.get('first_name', '')} {candidate.get('last_name', '')}".strip()
+    name = candidate.get('full_name') or f"{candidate.get('first_name', '')} {candidate.get('last_name', '')}".strip()
     group = candidate.get("group_id", "")
     session_id = payload.get("session_id", "")
     if kind == "session_start":

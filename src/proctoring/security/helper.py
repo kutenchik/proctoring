@@ -21,7 +21,7 @@ from .win32_backend import ParentProcess, WindowsBackend
 
 RECOVERY_REASONS = {"emergency_shortcut", "emergency_request", "heartbeat_timeout",
                     "parent_exited", "stdin_eof", "lease_expired", "keyboard_callback_error",
-                    "helper_error", "output_closed"}
+                    "helper_error", "output_closed", "foreground_containment_failed"}
 
 
 class HelperRuntime:
@@ -49,7 +49,7 @@ class HelperRuntime:
 
     def security(self, event_type: str, details: dict) -> None:
         if event_type == "PROTECTION_RECOVERY" and self.lease.armed:
-            self.release(details.get("reason", "helper_error"))
+            self.release(details.get("reason", "helper_error"), recovery_details=details)
             return
         self.emit({"kind": "security", "event_type": event_type,
                    "description": self._description(event_type, details),
@@ -66,7 +66,7 @@ class HelperRuntime:
         return ("Observed shortcut in audit mode: " if details.get("audit") else
                 "Blocked shortcut: ") + event_type.removeprefix("BLOCKED_").replace("_", " ").lower()
 
-    def release(self, reason: str, request_id=None, *, recovery_event: bool = True) -> None:
+    def release(self, reason: str, request_id=None, *, recovery_event: bool = True, recovery_details=None) -> None:
         was_armed = self.lease.armed
         # Native release MUST precede status, evidence, or other pipe writes.
         if self.backend is not None:
@@ -75,7 +75,7 @@ class HelperRuntime:
         self.lease.release(reason)
         if was_armed and recovery_event and reason in RECOVERY_REASONS:
             self.security("EMERGENCY_RELEASE" if reason.startswith("emergency") else
-                          "PROTECTION_RECOVERY", {"reason": reason})
+                          "PROTECTION_RECOVERY", {**(recovery_details or {}), "reason": reason})
         # Queue evidence before acknowledgement: the main process may finalize
         # its event journal as soon as it receives the recovery/disable status.
         self.status(request_id)
@@ -212,7 +212,8 @@ def main(argv=None) -> int:
         parent = ParentProcess(args.parent_pid)
         if not parent.alive():
             raise RuntimeError("The approved parent process has already exited")
-        runtime = HelperRuntime(args.parent_pid, output.emit)
+        from .electron_helper import ElectronHelperRuntime
+        runtime = ElectronHelperRuntime(args.parent_pid, output.emit)
         loop_watchdog = LoopWatchdog(time.monotonic())
 
         def monitor_helper_loop():
@@ -277,6 +278,8 @@ def main(argv=None) -> int:
     finally:
         if runtime is not None:
             runtime.release(runtime.lease.reason or "shutdown", recovery_event=False)
+            if hasattr(runtime, 'finish_cleanup'):
+                runtime.finish_cleanup()
         if parent is not None:
             parent.close()
         output.close()

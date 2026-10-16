@@ -33,10 +33,13 @@ export function displayTime(value: string | null | undefined, locale: string, ti
   return new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short', ...(timeZone ? {timeZone} : {})}).format(date);
 }
 
-export type Route = {page: 'exams' | 'library' | 'create' | 'detail' | 'live' | 'attempt' | 'login' | 'invite' | 'reset'; id?: string; token?: string};
+export type Route = {page: 'security' | 'configurations' | 'configuration' | 'exams' | 'library' | 'create' | 'detail' | 'live' | 'attempt' | 'login' | 'invite' | 'reset'; id?: string; source?: string; token?: string};
 export function routeFromHash(hash: string): Route {
   const [path, query = ''] = hash.replace(/^#\/?/, '').split('?');
   if (path === 'invite' || path === 'reset') return {page: path, token: new URLSearchParams(query).get('token') ?? ''};
+  if (path.startsWith('configuration/')) return {page:'configuration',id:decodeURIComponent(path.slice(14)),source:new URLSearchParams(query).get('from')||undefined};
+  if (path==='security') return {page:'security'};
+  if (path==='configurations') return {page:'configurations'};
   if (path.startsWith('live/')) return {page: 'live', id: decodeURIComponent(path.slice(5))};
   if (path.startsWith('exam/')) return {page: 'detail', id: decodeURIComponent(path.slice(5))};
   if (path.startsWith('attempt/')) return {page: 'attempt', id: decodeURIComponent(path.slice(8))};

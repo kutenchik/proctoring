@@ -12,10 +12,16 @@ class EventType(str, Enum):
     FACE_ABSENT = "face_absent"
     VOICE_DETECTED = "VOICE_DETECTED"
     IMPERSONATION_SUSPECTED = "IMPERSONATION_SUSPECTED"
+    PRESENTATION_ATTACK_SUSPECTED = "presentation_attack_suspected"
+    IDENTITY_MISMATCH_SUSPECTED = "identity_mismatch_suspected"
+    REMOTE_ACCESS_DETECTED = "remote_access_detected"
     EARPHONE_SUSPECTED = "EARPHONE_SUSPECTED"
 
 
 EVENT_LABELS = {
+    EventType.PRESENTATION_ATTACK_SUSPECTED: "Possible face presentation attack — review required",
+    EventType.IDENTITY_MISMATCH_SUSPECTED: "Possible face mismatch — review required",
+    EventType.REMOTE_ACCESS_DETECTED: "Remote-access signal — review required",
     EventType.PHONE_VISIBLE: "Phone visible",
     EventType.SECOND_PERSON: "Second person visible",
     EventType.PHONE_RAISED: "Phone raised — possible screen capture attempt.",

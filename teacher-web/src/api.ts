@@ -14,6 +14,7 @@ export interface Exam {
 export interface ExamPolicy {
   shuffle_questions: boolean; shuffle_options: boolean; audio_monitoring: boolean; save_snapshots: boolean;
   protection_mode: 'protected' | 'unprotected';
+  monitoring_policy?: import('./Configuration').Policy;
 }
 export type ExamInput = Omit<Exam, 'id' | 'code' | 'phase' | 'attempt_count' | 'participant_count' | 'quiz' | 'policy'> & ExamPolicy;
 export interface Attempt {

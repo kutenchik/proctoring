@@ -6,6 +6,7 @@ the canonical session/sequence/item/digest, not by a fresh request identity.
 """
 import base64
 import hashlib
+from ..advanced.settings import consent_version
 import json
 from pathlib import Path
 import re
@@ -34,7 +35,7 @@ def file_hash(path):
 def evidence_path(root, relative):
     if not isinstance(relative, str) or not re.fullmatch(
             r'(session\.json|events\.jsonl|summary\.json|answers\.json|[A-Za-z0-9_.-]+\.pdf|'
-            r'reference_face\.jpg|reference_recovery_[a-f0-9]{32}\.jpg|snapshots/[A-Za-z0-9_-]+\.jpg)', relative):
+            r'reference_face\.jpg|reference_recovery_[a-f0-9]{32}\.jpg|snapshots/[A-Za-z0-9_-]+\.jpg|audio/[A-Za-z0-9_-]+\.wav)', relative):
         raise ValueError('evidence_path_not_allowed')
     root = Path(root)
     target = root/relative
@@ -95,6 +96,15 @@ def build_manifest(base, row):
             items.append({'id': 'snapshot_error_'+str(index), 'kind': 'snapshot', 'relative_path': 'snapshots/error_'+str(index)+'.jpg',
                           'required': False, 'status': 'missing_error', 'size': None, 'sha256': None,
                           'error': 'Recorded snapshot production error'})
+    for event in summary.get('events', []):
+        if event.get('audio_path'):
+            event_id = event['event_id']
+            item('audio_'+hashlib.sha256(event_id.encode()).hexdigest(), 'audio', event['audio_path'])
+        elif event.get('audio_status') == 'unavailable':
+            event_id = event['event_id']
+            item('audio_'+hashlib.sha256(event_id.encode()).hexdigest(), 'audio', 'audio/'+event_id+'.wav', error='Audio production failed: '+str(event.get('audio_reason') or 'unavailable'))
+        elif event.get('audio_status') == 'pending':
+            raise ValueError('audio_production_pending')
     raw = evidence_path(root, 'events.jsonl').read_bytes()
     if raw and not raw.endswith(b'\n'):
         raise ValueError('journal_partial_record')
@@ -209,15 +219,20 @@ class SyncWorker:
             self.journal.update(key, event_cursor=cursor)
         return bool(batch)
 
-    def _snapshots(self, row, root):
-        """Journal-backed queue: one bounded chunk per turn, no device/UI work."""
-        if not row['admission']['exam']['save_snapshots'] or (row.get('screen_consent') or {}).get('version') != 3:
+    def _early_evidence(self, row, root, audio=False):
+        """Journal-backed queue: one bounded chunk per kind/turn, no device work."""
+        kind = "audio" if audio else "snapshot"
+        collection = "audio" if audio else "snapshots"
+        suffix = ".wav" if audio else ".jpg"
+        enabled = (row["admission"]["exam"].get("monitoring_policy", {}).get("values", {}).get("audio_evidence.enabled", False) if audio else row["admission"]["exam"]["save_snapshots"])
+        if not enabled or (row.get('screen_consent') or {}).get('version') != consent_version(row['admission']['exam']):
             return False
+        if audio and (row.get('screen_consent') or {}).get('accepted') is not True: return False
         key = 'attempt:'+row['attempt_id']
-        pending = dict(row.get('early_snapshots', {}))
-        cursor = row.get('snapshot_cursor', 0)
+        pending = dict(row.get('early_'+collection, {}))
+        cursor = row.get(kind+'_cursor', 0)
         accepted = row.get('event_cursor', 0)
-        offset = row.get('snapshot_offset', 0)
+        offset = row.get(kind+'_offset', 0)
         with evidence_path(root, 'events.jsonl').open('rb') as handle:
             handle.seek(offset)
             for sequence in range(cursor, min(accepted, cursor+100)):
@@ -226,41 +241,45 @@ class SyncWorker:
                 if not line.endswith(b'\n'): break
                 offset = handle.tell()
                 record = json.loads(line)
-                event_id, path = record.get('event_id'), record.get('snapshot_path')
+                event_id, path = record.get('event_id'), record.get(kind+'_path')
                 if (isinstance(event_id, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,96}', event_id)
-                        and record.get('event_type') and path == 'snapshots/'+event_id+'.jpg'):
+                        and record.get('event_type') and path == collection+'/'+event_id+suffix):
                     if event_id not in pending:
                         if len(pending) >= 1900:
                             # Defer discovery without losing the journal record or
                             # preventing final synchronization of the local bundle.
                             offset = record_offset
                             break
-                        pending[event_id] = {'path':path,'item_id':'event_'+hashlib.sha256(event_id.encode()).hexdigest(),'complete':False}
+                        pending[event_id] = {'path':path,'item_id':('audio_' if audio else 'event_')+hashlib.sha256(event_id.encode()).hexdigest(),'complete':False}
                 cursor = sequence+1
-        self.journal.update(key, early_snapshots=pending, snapshot_cursor=cursor, snapshot_offset=offset)
+        self.journal.update(key, **{"early_"+collection:pending,kind+"_cursor":cursor,kind+"_offset":offset})
         for event_id, item in pending.items():
             if item.get('complete'): continue
             path = evidence_path(root, item['path'])
             if not path.is_file(): continue  # late atomic publication is retried
             if not item.get('sha256'):
-                from PIL import Image
                 try:
                     size = path.stat().st_size
-                    if not 0 < size <= 8*1024*1024: raise ValueError('invalid_snapshot')
-                    with Image.open(path) as picture:
-                        if picture.format != 'JPEG' or picture.width*picture.height > 16_000_000: raise ValueError('invalid_snapshot')
-                        picture.load()
+                    if audio:
+                        from ..audio.evidence import validate_wav
+                        validate_wav(path)
+                    else:
+                        from PIL import Image
+                        if not 0 < size <= 8*1024*1024: raise ValueError('invalid_snapshot')
+                        with Image.open(path) as picture:
+                            if picture.format != 'JPEG' or picture.width*picture.height > 16_000_000: raise ValueError('invalid_snapshot')
+                            picture.load()
                     item.update(size=size, sha256=file_hash(path))
-                except (OSError, ValueError, Image.DecompressionBombError):
-                    item['error'] = 'invalid_snapshot'
+                except (OSError, ValueError):
+                    item['error'] = 'invalid_'+kind
                     continue
             if file_hash(path) != item['sha256'] or path.stat().st_size != item['size']:
                 raise ValueError('local_evidence_changed')
             # Freeze local identity before the request; a lost ACK must not allow
             # finalization to assign a new file ID or delete provisional evidence.
             item['declared'] = True
-            self.journal.update(key, early_snapshots=pending)
-            status = self._call(row, '/student/sync/snapshots', {'session_id':row['session_id'],
+            self.journal.update(key, **{"early_"+collection:pending})
+            status = self._call(row, '/student/sync/'+collection, {'session_id':row['session_id'],
                 'event_id':event_id,'size':item['size'],'sha256':item['sha256']})
             offset = status.get('received_bytes')
             if status.get('item_id') != item['item_id'] or type(offset) is not int or not 0 <= offset <= item['size']:
@@ -268,16 +287,22 @@ class SyncWorker:
             if not status.get('complete'):
                 with path.open('rb') as handle:
                     handle.seek(offset); data = handle.read(256*1024)
-                status = self._call(row, '/student/sync/snapshots/'+item['item_id']+'/chunks',
+                status = self._call(row, '/student/sync/'+collection+'/'+item['item_id']+'/chunks',
                     {'session_id':row['session_id'],'offset':offset,'data_base64':base64.b64encode(data).decode('ascii')})
                 if status.get('item_id') != item['item_id'] or status.get('received_bytes') != offset+len(data):
                     raise ValueError('invalid_upload_acknowledgement')
             item['complete'] = status.get('complete') is True and status.get('received_bytes') == item['size']
             item.pop('error', None)
-            self.journal.update(key, early_snapshots=pending)
+            self.journal.update(key, **{"early_"+collection:pending})
             return True
-        self.journal.update(key, early_snapshots=pending)
+        self.journal.update(key, **{"early_"+collection:pending})
         return False
+
+    def _snapshots(self, row, root):
+        return self._early_evidence(row, root)
+
+    def _audio(self, row, root):
+        return self._early_evidence(row, root, audio=True)
 
     def once(self, row):
         key = 'attempt:'+row['attempt_id']
@@ -296,6 +321,7 @@ class SyncWorker:
         row = next(r for r in self.journal.attempts() if r['attempt_id'] == row['attempt_id'])
         if row.get('phase') != 'ended_locally':
             self._snapshots(row, root)
+            self._audio(row, root)
         if records_sent:
             return
         if row.get('phase') != 'ended_locally' or not row.get('media_released'):

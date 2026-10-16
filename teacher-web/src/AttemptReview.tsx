@@ -1,3 +1,4 @@
+import { AudioEvidencePlayer } from './AudioEvidencePlayer';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, CheckCircle2, ChevronDown, Download, FileCheck2, FileClock, History, Image, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { api, ApiError } from './api';
@@ -60,6 +61,7 @@ function EventRow({event, attemptId, onSave, disabled}: {event: ReviewEvent; att
     <div className="event-buttons"><button className="quiet" disabled={disabled} onClick={() => setEditing(value => !value)}>{t('individualReview')}</button>
       {event.files.filter(file => /snapshot|reference|identity/.test(file.kind)).map(file => <button key={file.id} onClick={() => {setImageFailed(false); setOpenImage(openImage === file.id ? null : file.id);}}><Image size={16} aria-hidden="true" />{t('inspectSnapshot')}</button>)}
       {!event.files.length && <small>{t('noSnapshot')}</small>}</div>
+    <AudioEvidencePlayer attemptId={attemptId} audio={event.audio}/>
     {openImage && <figure className="snapshot-inspection"><figcaption>{t('historicalImage')}</figcaption>{imageFailed ? <p role="alert">{t('imageUnavailable')}</p> : <img src={evidenceUrl(attemptId,openImage)} alt={t('historicalImage')} onError={() => setImageFailed(true)} />}</figure>}
     {editing && <DecisionEditor events={[event]} onCancel={() => setEditing(false)} onSave={async (decision,comment) => {await onSave(`${attemptPath(attemptId)}/reviews`,reviewPayload([event],decision,comment)); setEditing(false);}} />}
     <ChangeHistory items={event.history} />

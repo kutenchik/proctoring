@@ -1,6 +1,6 @@
 export interface EventSnapshotState {status:'pending'|'available'|'unavailable'|'disabled'|'not_applicable';item_id?:string|null;reason?:string|null;}
 export type Presence = 'online' | 'offline' | 'reconnecting';
-export interface LiveEvent {event_id: string; event_type: string; timestamp?: string; duration_seconds?: number; category: 'behavioral' | 'technical'; sequence?: number; snapshot?: EventSnapshotState;}
+export interface LiveEvent {event_id: string; event_type: string; timestamp?: string; duration_seconds?: number; category: 'behavioral' | 'technical'; sequence?: number; snapshot?: EventSnapshotState; audio?: EventSnapshotState;}
 export interface LiveStatus {
   sequence: number; state: 'preparation' | 'running' | 'paused' | 'ended'; elapsed_seconds: number;
   remaining_seconds: number; duration_seconds: number; answered: number | null; total: number | null;
@@ -17,14 +17,14 @@ export interface LiveStudent {
 }
 export function mayExtendPreparation(student:LiveStudent) {return student.start_authorized===false&&['admitted','preparation_expired'].includes(student.lifecycle??'');}
 export function mayAuthorizeRestart(student:LiveStudent) {return student.lifecycle==='interrupted'&&student.restart_recovery?.state==='pending'&&!!student.restart_recovery.interruption_id&&!student.restart_recovery.grant_id;}
-export type CommandType = 'warning' | 'pause' | 'resume' | 'end' | 'add_time' | 'monitoring_recovery' | 'display_recovery';
+export type CommandType = 'monitoring_policy' | 'warning' | 'pause' | 'resume' | 'end' | 'add_time' | 'monitoring_recovery' | 'display_recovery';
 export interface LiveCommand {command_id: string; attempt_id: string; command_type: CommandType; payload: Record<string,unknown>; created_at: string; expires_at: string; status: 'sent'|'delivered'|'applied'|'rejected'|'not_delivered'|'execution_unconfirmed'; result: Record<string,unknown> | null;}
 export interface ViewerLease {viewer_id: string; attempt_id: string; session_id: string; expires_at: string; limits: Record<string,number>;}
 export function socketUrl(path: string, base = location.href) {const url = new URL(path, base); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; return url.toString();}
 export function screenOnlyOffer(sdp:unknown):sdp is string {return typeof sdp==='string'&&sdp.length<=65536&&/^m=application /m.test(sdp)&&!/^m=(audio|video) /m.test(sdp);}
 export function mergeEvents(old: LiveEvent[], next: LiveEvent[]): LiveEvent[] {
   const values = new Map(old.map(e => [e.event_id, e]));
-  for (const event of next) values.set(event.event_id, {...event,snapshot:event.snapshot??values.get(event.event_id)?.snapshot});
+  for (const event of next) values.set(event.event_id, {...event,audio:event.audio??values.get(event.event_id)?.audio,snapshot:event.snapshot??values.get(event.event_id)?.snapshot});
   return [...values.values()].sort((a,b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? '') || (a.sequence ?? 0)-(b.sequence ?? 0)).slice(-100);
 }
 export function mergeCommands(old: LiveCommand[], next: LiveCommand[]): LiveCommand[] {

@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+from uuid import uuid4
 import queue
 import threading
 import time
@@ -84,7 +85,7 @@ def _time(value):
 
 def _policy_identity(exam):
     return {key: exam.get(key) for key in ('id', 'title', 'exam_type', 'duration_seconds', 'external_url',
-        'shuffle_questions', 'shuffle_options', 'audio_monitoring', 'save_snapshots', 'protection_mode')}
+        'shuffle_questions', 'shuffle_options', 'audio_monitoring', 'save_snapshots', 'protection_mode', 'monitoring_policy')}
 
 
 def frozen_policy(config, admission):
@@ -106,7 +107,10 @@ def frozen_policy(config, admission):
         mode = exam['protection_mode']
         if mode not in ('protected', 'unprotected'):
             raise ValueError()
-        if (mode == 'protected') != config.protection.enabled:
+        from ..runtime import is_frozen
+        if is_frozen() and mode != ('protected' if config.protection.enabled else 'unprotected'):
+            raise ConnectedError('packaged_requires_protected' if config.protection.enabled else 'packaged_requires_unprotected')
+        if mode == 'protected' and not config.protection.enabled:
             raise ConnectedError('protection_policy_mismatch')
         external = NavigationPolicy(exam['external_url'], ()) if exam['exam_type'] == 'external' else None
         quiz = None
@@ -118,11 +122,19 @@ def frozen_policy(config, admission):
             public = [{'id': q.id, 'prompt': q.prompt, 'options': q.options} for q in quiz.questions]
             if len(json.dumps(public, ensure_ascii=False).encode()) > 64*1024:
                 raise ConnectedError('quiz_too_large')
-        updated = replace(config, duration_seconds=float(duration), snapshots_enabled=exam['save_snapshots'],
+        updated = replace(config, protection=replace(config.protection, enabled=mode == 'protected'), duration_seconds=float(duration), snapshots_enabled=exam['save_snapshots'],
                           audio=replace(config.audio, enabled=exam['audio_monitoring']),
                           registration=replace(config.registration, enabled=True, require_group=True),
                           external_url=external.external_url if external else '',
                           allowed_domains=external.allowed_domains if external else ())
+        if 'monitoring_policy' in exam:
+            from ..exam_policy import apply_policy
+            updated = apply_policy(updated, exam['monitoring_policy'])
+            from ..runtime import is_frozen
+            if is_frozen() and (updated.advanced.identity_enabled or updated.advanced.liveness_enabled):
+                raise ConnectedError('optional_face_unavailable_in_distribution')
+            if updated.audio.enabled != exam['audio_monitoring'] or updated.snapshots_enabled != exam['save_snapshots']:
+                raise ValueError('Conflicting monitoring policy')
         return updated, quiz
     except ConnectedError:
         raise
@@ -153,6 +165,8 @@ class ConnectedClient:
         self.admission = None
         self.identity = None
         self.busy = None
+        self.pin_request = 0
+        self.pin_status = None
         self.error = initial_error
         self.deadline = 0.
         self.start_authorized = False
@@ -170,6 +184,9 @@ class ConnectedClient:
             unfinished = [r for r in journal.attempts() if not r.get('cleanup')]
             if unfinished:
                 self.durable = unfinished[-1]
+                from ..runtime import distribution_identity, is_frozen
+                if is_frozen() and self.durable.get('distribution_identity') != distribution_identity():
+                    raise ConnectedError('unfinished_attempt_from_different_build')
                 self.server = self.suggested_server = server_origin(self.durable['server'], settings.allow_loopback_http)
                 self.credential = self.durable['credential']
                 self.identity = self.durable['identity']
@@ -222,7 +239,7 @@ class ConnectedClient:
                     if response.status_code < 200 or response.status_code >= 300:
                         detail = data.get('detail') if isinstance(data, dict) else None
                         code = detail.get('code') if isinstance(detail, dict) else None
-                        safe_codes = {'invalid_code', 'exam_not_found', 'admission_closed', 'admission_not_open', 'attempt_exists',
+                        safe_codes = {'invalid_pin','pin_rate_limited','pin_revision_changed','invalid_code', 'exam_not_found', 'admission_closed', 'admission_not_open', 'attempt_exists',
                                       'preparation_expired', 'invalid_credential', 'invalid_identity', 'attempt_finished',
                                       'attempt_superseded', 'attempt_not_started', 'repeat_authorized', 'invalid_result',
                                       'recovery_required', 'recovery_not_authorized', 'invalid_device', 'manifest_incomplete',
@@ -273,12 +290,16 @@ class ConnectedClient:
                 method = 'GET' if operation == 'refresh' else 'POST'
                 endpoint = {'refresh': '/student/attempt', 'start': '/student/start', 'finish': '/student/finish',
                             'confirm': '/student/start/confirm', 'interrupted': '/student/interrupted',
-                            'recover': '/student/recovery/consume', 'recovered': '/student/recovery/confirm'}[operation]
+                            'recover': '/student/recovery/consume', 'recovered': '/student/recovery/confirm',
+                            'proctor_pin': '/student/protection-pin/verify'}[operation]
                 body = payload if operation in ('finish','confirm','interrupted','recover','recovered') else None
                 if operation == 'start' and self.durable:
                     body = {k: self.durable[k] for k in ('start_key','session_id')}
                     self.persist(phase='start_authorization_pending')
         self.error, self.busy = None, operation
+        if operation == 'proctor_pin':
+            self.pin_request += 1
+            self.pin_status = 'pending'
         if operation == 'start':
             self.start_attempted = True
         if operation == 'finish':
@@ -287,10 +308,21 @@ class ConnectedClient:
         credential = self.credential
         def work():
             try:
-                data = self.transport(method, origin, endpoint, body, credential)
-                result = (operation, started, origin, payload, data, None)
+                if operation == 'proctor_pin':
+                    revision = self.transport('GET', origin, '/student/protection-pin', None, credential)
+                    if revision.get('configured') is not True or type(revision.get('revision')) is not int:
+                        raise ConnectedError('teacher_pin_not_configured')
+                    nonce = uuid4().hex
+                    result_pin = self.transport('POST', origin, endpoint,
+                        {'pin': payload['pin'], 'action': payload['action'], 'nonce': nonce, 'revision': revision['revision']}, credential)
+                    if result_pin != {'authorized': True, 'action': payload['action'], 'nonce': nonce, 'revision': revision['revision']}:
+                        raise ConnectedError('invalid_response')
+                    data = {'action': payload['action']}
+                else:
+                    data = self.transport(method, origin, endpoint, body, credential)
+                result = (operation, started, origin, {} if operation == 'proctor_pin' else payload, data, None)
             except Exception as error:
-                result = (operation, started, origin, payload, None,
+                result = (operation, started, origin, {} if operation == 'proctor_pin' else payload, None,
                           str(error) if isinstance(error, ConnectedError) else 'connection_failed')
             if not self.closed:
                 self._results.put_nowait(result)
@@ -305,11 +337,17 @@ class ConnectedClient:
         self.busy = None
         if error:
             self.error = error
+            if operation == 'proctor_pin': self.pin_status = 'rejected'
             if operation == 'finish':
                 self.finish_status = 'failed'
             return None
         try:
-            if operation == 'verify':
+            if operation == 'proctor_pin':
+                if self.clock() - started > 5:
+                    raise ConnectedError('pin_authorization_expired')
+                self.pin_action = data['action']
+                self.pin_status = 'authorized'
+            elif operation == 'verify':
                 if data.get('service') != 'local-proctoring-teacher' or data.get('api_version') != 1:
                     raise ConnectedError('invalid_server')
                 _time(data.get('server_time'))
@@ -334,6 +372,8 @@ class ConnectedClient:
                 self.admission = {key: value for key, value in data.items() if key != 'credential'}
                 if operation == 'admit' and self.journal is not None:
                     self.durable = self.journal.admit(self.server, self.admission, self.identity, self.credential)
+                    from ..runtime import distribution_identity
+                    self.persist(distribution_identity=distribution_identity())
                 elif self.durable:
                     self.persist(admission=self.admission)
                 if operation == 'start':
@@ -348,6 +388,7 @@ class ConnectedClient:
                 self.finish_status = 'sent'
             return operation
         except (KeyError, TypeError, ValueError) as error:
+            if operation == 'proctor_pin': self.pin_status = 'rejected'
             self.error = str(error) if isinstance(error, ConnectedError) else 'invalid_response'
             if operation == 'finish':
                 self.finish_status = 'failed'
@@ -355,6 +396,7 @@ class ConnectedClient:
 
     def public(self):
         return {'enabled': True, 'server_url': self.suggested_server, 'verified_server': self.server,
+                'pin_request': self.pin_request, 'pin_status': self.pin_status,
                 'busy': self.busy, 'error': self.error, 'admitted': self.admission is not None,
                 'attempt_id': self.admission['attempt_id'] if self.admission else None,
                 'exam_title': str(self.admission['exam'].get('title', '')) if self.admission else '',

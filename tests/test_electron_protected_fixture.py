@@ -11,6 +11,20 @@ def endpoint():
     return result
 
 
+def test_foreground_precondition_is_read_only_and_requires_exact_binding():
+    fixture=endpoint(); armed=[]
+    fixture.client.arm=lambda:armed.append(True)
+    with pytest.raises(ValueError,match='Verified fixture'): fixture.command('test.foreground',{})
+    current=[42]
+    fixture.client.binding=SimpleNamespace(valid=lambda:True,allows=lambda hwnd:hwnd==42,
+        native=SimpleNamespace(u=SimpleNamespace(GetForegroundWindow=lambda:current[0])))
+    assert fixture.command('test.foreground',{})=={'owned_foreground':True}
+    current[0]=999
+    assert fixture.command('test.foreground',{})=={'owned_foreground':False}
+    with pytest.raises(ValueError): fixture.command('test.foreground',{'arbitrary':True})
+    assert not armed
+
+
 @pytest.mark.parametrize('seconds',[None,True,0,.49,15.01,999,float('nan'),float('inf')])
 def test_protected_fixture_never_arms_without_bounded_explicit_maximum(seconds):
     fixture=endpoint(); called=[]; fixture.client.arm=lambda:called.append(True)

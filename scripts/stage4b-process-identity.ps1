@@ -29,7 +29,10 @@ function Assert-Stage4BIdentity($Record) {
 }
 function Read-Stage4BIdentity([string]$Path) {
     $raw=Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-    $records=@($raw | ConvertFrom-Json -ErrorAction Stop)
+    # Windows PowerShell 5.1 emits a JSON array as one pipeline object.
+    # Normalize the decoded value, not the pipeline's output envelope.
+    $decoded=$raw | ConvertFrom-Json -ErrorAction Stop
+    $records=@($decoded)
     if($records.Count -lt 1 -or $records.Count -gt 32) { throw 'Invalid ownership record count' }
     # Ownership documents contain scalar fields only. Reject unknown/duplicate JSON
     # keys instead of silently accepting ConvertFrom-Json's last-value behavior.

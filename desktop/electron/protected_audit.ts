@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import { Fixture } from './recovery_audit';
+import { runMaximumLeaseCheck } from './maximum_lease_check';
 import { ensureRuntimeConfig, resolveRuntime } from './runtime';
 import { assertSuppressedProbe, assertOrdinaryInputProbe, assertControlLossRelease, assertNormalRelease, foregroundRecoveryBound, assertCrossProcessForegroundRecovery, assertSuspendedOwnerDeath, runProtectedCheck } from './protected_assertions';
 
@@ -170,7 +171,16 @@ export async function runProtectedAudit(): Promise<void> {
         meaning: outcome.outcome === 'restored' ? 'Actual separate-process foreground restored to the registered exam HWND.' : 'Containment failed; bounded terminal release worked. This is not a successful-containment result.' });
     });
     await check('emergency_release', async () => { const f = await fixture(); await enable(f); await f.ask('focus_context', { kind: 'trusted' }); await call(f, 'audit.emergency'); await normalInput(f); });
-    await check('maximum_lease', async () => { const f = await fixture(); await enable(f, 2); await normalInput(f); if ((await f.state()).native.reason !== 'lease_expired') throw new Error('Maximum lease was not the release cause'); });
+    await check('maximum_lease', async () => {
+      const f = await fixture();
+      return runMaximumLeaseCheck({
+        focus: async () => {
+          await f.ask('focus_context', { kind: 'trusted' });
+          await wait(async () => (await call(f, 'test.foreground')).owned_foreground === true, 2000);
+        },
+        enable: seconds => enable(f, seconds), normalInput: () => normalInput(f), state: () => f.state(),
+      });
+    });
     await check('renderer_loss', async () => {
       const f = await fixture(); await enable(f); await f.ask('renderer_stall');
       await wait(async () => released(await f.state()));

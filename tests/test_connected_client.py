@@ -221,3 +221,21 @@ def test_finish_status_distinguishes_pending_acknowledged_and_failed(tmp_path):
     client.transport = lambda *args: (_ for _ in ()).throw(ConnectedError('connection_failed'))
     client.submit('finish', {'score': 1, 'total': 1, 'end_reason': 'completed'}); settle(client)
     assert client.public()['finish_status'] == 'failed'
+
+
+def test_managed_pin_request_is_async_and_one_response_not_a_cached_secret(tmp_path):
+    client,clock=ready_client(tmp_path)
+    client.submit('admit',IDENTITY);settle(client)
+    gate=threading.Event()
+    def transport(method,origin,endpoint,body,credential):
+        if method=='GET': return {'configured':True,'revision':4}
+        gate.wait(1)
+        return {'authorized':True,'revision':body['revision'],'action':body['action'],'nonce':body['nonce']}
+    client.transport=transport
+    client.submit('proctor_pin',{'pin':'836204','action':'proctor.pause'})
+    assert client.busy=='proctor_pin' and client.poll() is None
+    gate.set()
+    assert settle(client)=='proctor_pin' and client.pin_action=='proctor.pause'
+    client.submit('proctor_pin',{'pin':'836204','action':'proctor.resume'})
+    client._thread.join(2);clock.advance(6)
+    assert client.poll() is None and client.error=='pin_authorization_expired'

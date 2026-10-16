@@ -247,6 +247,7 @@ class AudioMonitor(QObject):
         self._switch_cancelled = False
         self._calibration_requested_at = None
         self._device_refresh = False
+        self.evidence_sink = None
 
     @property
     def status(self):
@@ -418,6 +419,9 @@ class AudioMonitor(QObject):
                     capture_end = (observed_end if capture_end is None or overflow else
                                    min(observed_end, capture_end+duration))
                     stale = now-capture_end > .5
+                    sink = self.evidence_sink
+                    if sink is not None:
+                        sink.feed(samples,capture_end,actual_rate,not (overflow or stale))
                     emit_level = None
                     with self._lock:
                         # A device read may finish after bounded stop() returned.
@@ -457,9 +461,12 @@ class AudioMonitor(QObject):
                     message = str(error)
                 self._detector.unavailable(message)
                 self.audio_level_changed.emit(0.)
+            if self.evidence_sink is not None: self.evidence_sink.interrupt()
             logging.getLogger(__name__).info("Optional audio input unavailable (%s)", type(error).__name__)
 
     def stop(self, timeout=.5):
+        sink, self.evidence_sink = self.evidence_sink, None
+        if sink is not None: sink.close()
         with self._lock:
             if threading.current_thread() is not self._switch_thread:
                 self._switch_cancelled = True

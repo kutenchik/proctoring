@@ -15,6 +15,7 @@ export interface ReviewChange {
 }
 export interface EvidenceFile {id: string; kind: string; filename?: string; relative_path?: string; size?: number; sha256?: string; received_bytes?: number; complete?: boolean; requirement?: string; status?: string; error?: string;}
 export interface ReviewEvent {
+  audio?: import("./live-model").EventSnapshotState;
   event_id: string; event_type: string; timestamp: string; duration_seconds: number;
   category: 'behavioral' | 'technical'; files: EvidenceFile[];
   review: EventDecision | null; history: ReviewChange[];

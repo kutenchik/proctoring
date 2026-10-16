@@ -17,7 +17,7 @@ public example binds to `http://127.0.0.1:8000` and explicitly allows the teache
 origin `http://127.0.0.1:5174` for loopback-only HTTP development.
 
 ```powershell
-Set-Location 'C:\Users\kuten\Desktop\case3_proctoring\teacher-web'
+Set-Location 'C:\Users\kuten\Desktop\proctoring-main\teacher-web'
 npm ci
 npm run dev
 ```
@@ -198,7 +198,7 @@ recovery and material uploads continue.
 ### Focused Stage 3 verification
 
 ```powershell
-Set-Location 'C:\Users\kuten\Desktop\case3_proctoring\teacher-web'
+Set-Location 'C:\Users\kuten\Desktop\proctoring-main\teacher-web'
 npx tsx --test tests/live.test.ts
 npm run build
 npx playwright test --config playwright.live.config.ts

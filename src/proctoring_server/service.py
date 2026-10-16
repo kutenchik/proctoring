@@ -226,6 +226,12 @@ class Service:
         policy["protection_mode"] = data.get("protection_mode", "unprotected")
         if policy["protection_mode"] not in ("protected", "unprotected"):
             raise Problem("invalid_policy", "Protection mode must be protected or unprotected")
+        if 'monitoring_policy' in data:
+            from .configuration import checked
+            policy['monitoring_policy'] = checked(data['monitoring_policy'])
+            values = policy['monitoring_policy']['values']
+            policy['audio_monitoring'] = values['audio.enabled']
+            policy['save_snapshots'] = values['snapshots_enabled']
         external = ""
         if exam_type == "external":
             external = text_field(data, "external_url", 2048)
@@ -425,7 +431,9 @@ class Service:
         public_exam.pop("participant_count", None)
         public_exam.pop("attempt_count", None)
         public_exam["policy"] = json.loads(attempt["policy_snapshot"])
+        managed_pin = connection.execute('SELECT revision FROM protection_pins WHERE teacher_id=?', (exam['teacher_id'],)).fetchone()
         return {"attempt_id": attempt["id"], "status": document["status"], "server_time": iso(self.clock()),
+                "protection_pin_configured": managed_pin is not None,
                 "preparation_deadline": document["preparation_deadline"], "started_at": document["started_at"],
                 "finished_at": document["finished_at"], "exam": public_exam,
                 "quiz": json.loads(attempt["quiz_snapshot"]) if attempt["quiz_snapshot"] else None}

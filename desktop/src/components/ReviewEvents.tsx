@@ -8,6 +8,9 @@ export function useEventLabel() {
   const t = useT(); const w = useW();
   return (record: ReviewEvent) => {
     const kind = record.event_type;
+    if (kind === 'remote_access_detected') return w('remoteReview');
+    if (kind === 'presentation_attack_suspected') return w('livenessReview');
+    if (kind === 'identity_mismatch_suspected') return w('advancedIdentityReview');
     if (kind === 'phone_raised') return t('phoneRaised');
     if (kind === 'phone_visible') return w('phone');
     if (kind === 'second_person') return w('secondPerson');

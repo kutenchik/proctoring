@@ -7,6 +7,7 @@ import path from 'node:path';
 import { nativeHandleHex } from './host_binding';
 import { ensureRuntimeConfig, resolveRuntime } from './runtime';
 import { AuditRunIdentity } from './recovery_identity';
+import { AuditOutput } from './audit_output';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export class Fixture {
@@ -96,7 +97,12 @@ export class Fixture {
   private diagnosticDetail(): string { return this.diagnostics.length ? ` [${this.diagnostics.join(', ')}]` : ''; }
 }
 
-export async function runRecoveryAudit(): Promise<void> {
+export async function runRecoveryAudit(createFixture = (output: string, config: string) => new Fixture(output, config)): Promise<void> {
+  const active = new Set<Fixture>(); let abort = false;
+  const progress = new AuditOutput(process.stdout, process.stderr, () => {
+    abort = true;
+    for (const fixture of active) void fixture.close().catch(() => {});
+  });
   await app.whenReady();
   const runtime = resolveRuntime({ packaged: app.isPackaged, appRoot: path.resolve(__dirname, '..'), resources: process.resourcesPath,
     executable: process.execPath, cwd: process.cwd(), argv: process.argv, env: process.env });
@@ -111,13 +117,13 @@ export async function runRecoveryAudit(): Promise<void> {
   const savePending = async (reason: string) => {
     const temporary = `${output}.${attemptId}.pending`;
     await writeFile(temporary, JSON.stringify({ schema: 2, frontend: 'electron', mode: 'audit_only', blocking_enabled: false,
-      passed: false, status: 'pending_or_incomplete', attempt_id: attemptId, generated_at: new Date().toISOString(),
-      identity: runIdentity.initial, run_identity_stable: runIdentity.stable, reason, checks }, null, 2));
+      passed: false, status: progress.failure || abort ? 'failed' : 'pending_or_incomplete', attempt_id: attemptId, generated_at: new Date().toISOString(),
+      identity: runIdentity.initial, run_identity_stable: runIdentity.stable,
+      first_failure: progress.failure, reason: progress.failure ?? reason, checks }, null, 2));
     await rename(temporary, output);
   };
   // A crashed/cancelled fresh attempt must never leave an older PASS usable.
   await savePending('Native recovery audit started; no checks completed');
-  const active = new Set<Fixture>(); let abort = false;
   const retiredOwners = new Map<string, { kind: string; pid: number; created: string }>();
   const statusWindow = new BrowserWindow({ width: 660, height: 360, title: 'Electron recovery audit — no suppression', webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   await statusWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<h2>Native recovery audit</h2><p>No shortcut suppression or foreground containment. Owned temporary windows will open.</p><pre id="status">Preparing checks…</pre>'));
@@ -125,7 +131,7 @@ export async function runRecoveryAudit(): Promise<void> {
   const record = async (name: string, passed: boolean, detail: string) => {
     checks.push({ name, passed, detail: detail.slice(0, 1900) });
     await savePending('Audit incomplete; only an explicit complete finish can pass');
-    console.log(JSON.stringify({ native_audit: name, passed, detail }));
+    await progress.write({ native_audit: name, passed, detail });
     if (!statusWindow.isDestroyed()) void statusWindow.webContents.executeJavaScript(`document.getElementById('status').textContent=${JSON.stringify(checks.map(c => `${c.passed ? 'PASS' : 'FAIL / NOT RUN'} ${c.name}`).join('\n'))}`).catch(() => {});
   };
   const wait = async (predicate: () => Promise<boolean>, timeout = 8000) => {
@@ -141,7 +147,7 @@ export async function runRecoveryAudit(): Promise<void> {
   };
   const fixture = async (bind = true) => {
     if (abort) throw new Error('Operator cancelled');
-    const f = new Fixture(output, runtime.config); active.add(f); await f.ready;
+    const f = createFixture(output, runtime.config); active.add(f); await f.ready;
     if (bind) await bindFixture(f);
     return f;
   };
@@ -184,10 +190,14 @@ export async function runRecoveryAudit(): Promise<void> {
   const check = async (name: string, action: () => Promise<string | void>) => {
     try {
       if (abort) throw new Error('NOT RUN: operator cancelled');
+      await progress.write({ audit_stage: name });
       const detail = await action(); await cleanupCheckpoint();
       await record(name, true, (detail || 'Native owned fixture passed') + '; exact-owner cleanup and fresh re-registration checked');
     }
-    catch (error) { await record(name, false, String(error)); }
+    catch (error) {
+      if (progress.failure) throw error;
+      await record(name, false, String(error));
+    }
     finally { await closeAll(); }
   };
   const site = createServer((_request, response) => { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end('<h2>Controlled external audit page</h2><input aria-label="Fixture answer">'); });
@@ -280,18 +290,23 @@ export async function runRecoveryAudit(): Promise<void> {
     // This unbound observer has no helper/guardian. Its owning fixture waits
     // for the direct backend child exit before its own process can finish.
     await close(verifier);
+    await progress.write({ report: output, passed: result.result.report.passed, missing: result.result.report.missing_checks });
+    progress.assertHealthy();
     const completed = `${output}.${attemptId}.completed`;
     await writeFile(completed, JSON.stringify({ ...result.result.report,
-      attempt_id: attemptId, run_identity_stable: runIdentity.stable }, null, 2));
+      status: 'completed', attempt_id: attemptId, run_identity_stable: runIdentity.stable }, null, 2));
+    progress.assertHealthy();
     await rename(completed, output);
-    console.log(JSON.stringify({ report: output, passed: result.result.report.passed, missing: result.result.report.missing_checks }));
   } catch (error) {
+    abort = true;
+    process.exitCode = 1;
     await savePending(`Native audit did not finish: ${String(error)}`);
     throw error;
   } finally {
     try { await closeAll(); }
-    catch (error) { await savePending(`Final owned cleanup failed: ${String(error)}`); }
+    catch (error) { abort = true; process.exitCode = 1; await savePending(`Final owned cleanup failed: ${String(error)}`); }
     finally {
+      if (progress.failure) await savePending(progress.failure);
       await new Promise<void>(resolve => site.close(() => resolve()));
       if (!statusWindow.isDestroyed()) statusWindow.destroy();
       app.quit();

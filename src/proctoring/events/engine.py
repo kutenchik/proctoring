@@ -59,6 +59,18 @@ class EventEngine:
         self._events: list[dict] = []
         self._last_observation: float | None = None
         self._minimum_timestamp = float("-inf")
+        self.disabled: set[EventType] = set()
+
+    def configure_policy(self, thresholds, clearing_seconds, disabled=()):
+        """Close episodes at a revision boundary; keep IDs and historical events."""
+        for value in thresholds.values():
+            self._positive_finite(value, 'Event thresholds')
+        self._positive_finite(clearing_seconds, 'Clearing duration')
+        changes = self.interrupt('policy_changed')
+        self.thresholds = dict(thresholds)
+        self.clearing_seconds = clearing_seconds
+        self.disabled = set(disabled)
+        return changes
 
     @staticmethod
     def _positive_finite(value: float, name: str) -> None:
@@ -133,6 +145,8 @@ class EventEngine:
         wall_timestamp = self.clock.wall_time()
 
         for kind, threshold in self.thresholds.items():
+            if kind in self.disabled:
+                continue
             evidence = self._evidence.get(kind)
             # An expired clearing period closes even if this sample is positive.
             # A fresh candidate then starts; unseen time cannot bridge the gap.

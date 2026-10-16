@@ -9,7 +9,9 @@ def main(arguments=None):
         print("Launch LocalProctoring-Electron.exe, not this private backend.", file=sys.stderr)
         return 2
     mode, *remaining = arguments
-    if mode == "--protection-helper":
+    if mode == "--packaged-startup-check":
+        from proctoring.security.packaged_startup import main as child
+    elif mode == "--protection-helper":
         from proctoring.security.helper import main as child
     elif mode == "--protection-guardian":
         from proctoring.security.guardian import main as child

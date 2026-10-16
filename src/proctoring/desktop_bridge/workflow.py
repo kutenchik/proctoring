@@ -26,6 +26,8 @@ class WorkflowBridge(SetupBridge):
                  expected_launch_id=None, package_root=None, connected_client=None, live_factory=None, **kwargs):
         self.admission_client = connected_client
         self._admission_applied = False
+        self.policy_revision = 0
+        self.effective_policy = None
         self._connected_start_pending = False
         self.connected_sync = None
         self.live_teacher = None
@@ -74,8 +76,10 @@ class WorkflowBridge(SetupBridge):
             try:
                 journal = DurableJournal(Path(os.environ.get('LOCALAPPDATA', Path.home()))/'LocalProctoring'/'connected-stage2.sqlite3')
                 self.admission_client = ConnectedClient(config.connected, monotonic=self.clock.monotonic, journal=journal)
-            except Exception:
-                self._secure_storage_error = 'secure_storage_unavailable'
+            except Exception as error:
+                self._secure_storage_error = ('unfinished_attempt_from_different_build'
+                    if isinstance(error,ConnectedError) and str(error)=='unfinished_attempt_from_different_build'
+                    else 'secure_storage_unavailable')
                 self.admission_client = ConnectedClient(config.connected, monotonic=self.clock.monotonic)
                 self.admission_client.error = self._secure_storage_error
         if self.admission_client is not None and self.admission_client.journal is not None:
@@ -155,7 +159,23 @@ class WorkflowBridge(SetupBridge):
         candidate = CandidateInfo('', '', identity['group'], identity['full_name'], identity['student_id'])
         if self.consent or self.controller.store is not None or self.controller.session.started:
             raise ConnectedError('policy_too_late')
+        if 'monitoring_policy' in client.admission['exam'] and client.journal:
+            saved=client.journal.get('attempt:'+client.admission['attempt_id']) or {}
+            if saved.get('effective_monitoring_policy'):
+                from ..exam_policy import apply_policy
+                config=apply_policy(config,saved['effective_monitoring_policy'])
+                self.policy_revision=saved.get('policy_revision',0)
         self.config = self.controller.config = config
+        if self._protected_requested and not config.protection.enabled:
+            # Admission can select unprotected use within a protection-capable
+            # host, never the reverse. No session or device capture exists yet.
+            self.controller.protection.close()
+            from ..security.protection import NoOpProtection
+            self.controller.protection = NoOpProtection()
+            self.electron_protection = None
+            self._protected_requested = False
+            if self.controller.system_checker is not None:
+                self.controller.system_checker.clipboard_scope_guard = lambda: False
         self.controller.session.duration_seconds = config.duration_seconds
         if quiz is not None:
             self.controller.quiz = quiz
@@ -166,6 +186,10 @@ class WorkflowBridge(SetupBridge):
                 config.clearing_seconds, self.clock, max_observation_gap=.5, accumulate_sample_durations=True)
         elif not config.audio.enabled:
             self.controller.audio_events = None
+        if 'monitoring_policy' in client.admission['exam']:
+            from ..exam_policy import configure_admission, values_from_config
+            configure_admission(self, config)
+            self.effective_policy = {'schema_version': 3, 'values': values_from_config(config)}
         self.controller.register_candidate(candidate.as_dict())
         self.controller.connected_attempt = {'attempt_id': client.admission['attempt_id'],
                                             'exam_id': client.admission['exam']['id'],
@@ -174,6 +198,7 @@ class WorkflowBridge(SetupBridge):
         self._admission_applied = True
         if self.connected_sync:
             self.connected_sync.admitted()
+        self.controller.configure_advanced(str(self._session_id())+':'+client.admission['attempt_id'])
 
     def _poll_admission(self):
         client = self.admission_client
@@ -181,6 +206,19 @@ class WorkflowBridge(SetupBridge):
             return
         operation = client.poll()
         try:
+            if operation == 'proctor_pin':
+                action = client.pin_action
+                client.pin_action = None
+                session = self.controller.session
+                if session.started and not session.ended:
+                    if action == 'proctor.pause':
+                        session.pause_by_proctor()
+                    elif action == 'proctor.resume':
+                        if not session.resume_by_proctor(True):
+                            client.error = 'resume_blocked'
+                    elif action == 'proctor.end':
+                        self.controller.end('proctor_ended')
+                    self.controller._write_session_records()
             if operation == 'admit':
                 self._apply_admission()
             if self.connected_sync and operation:
@@ -276,6 +314,8 @@ class WorkflowBridge(SetupBridge):
                     'geometry.changed', 'host.bind', 'host.progress', 'host.safety_release',
                     'shutdown', 'presentation.lost', 'events.get','live.poll','live.capture'}:
                 raise BridgeError('admission_required', 'Complete teacher-server admission before device setup')
+            if self.effective_policy is not None and not self.config.audio.enabled and command in ('audio.start','audio.calibrate'):
+                raise BridgeError('audio_disabled','Microphone monitoring is disabled by exam policy')
             setup_commands = {'devices.refresh', 'camera.select', 'microphone.select', 'consent.set',
                               'camera.start', 'camera.stop', 'audio.start', 'audio.stop', 'audio.calibrate',
                               'registration.submit', 'reference.capture', 'calibration.start',
@@ -364,7 +404,13 @@ class WorkflowBridge(SetupBridge):
             elif command == 'camera.start':
                 self._require_consent()
                 self._selected('cameras', self.camera_key)
-                self.controller.prepare_camera_preview()
+                try:
+                    self.controller.prepare_camera_preview()
+                except Exception as error:
+                    from .diagnostics import emit
+                    emit('camera_failed', error=error)
+                    raise BridgeError('camera_initialization_failed',
+                                      'Camera initialization failed; check permissions and connection, then retry camera') from error
                 self.camera = self.monitor._camera
                 self._camera_state = 'opening'
             elif command == 'camera.stop':
@@ -378,7 +424,7 @@ class WorkflowBridge(SetupBridge):
                 self._require_consent()
                 if self.config.registration.enabled and self.controller.candidate_info is None:
                     raise BridgeError('registration_required', 'Submit candidate details before taking the reference photo')
-                if not self.config.identity.selfie_verification_enabled:
+                if not (self.config.identity.selfie_verification_enabled or self.config.advanced.identity_enabled):
                     raise BridgeError('not_enabled', 'Reference-photo comparison is not enabled')
                 self.controller.capture_identity_baseline()
             elif command == 'calibration.start':
@@ -457,6 +503,11 @@ class WorkflowBridge(SetupBridge):
             elif command in {'proctor.pause', 'proctor.resume', 'proctor.end'}:
                 if not session.started:
                     raise BridgeError('wrong_state', 'No exam has started')
+                if self.admission_client is not None:
+                    if session.ended:
+                        raise BridgeError('wrong_state', 'Exam has ended')
+                    self.admission_client.submit('proctor_pin', {'pin': payload['pin'], 'action': command})
+                    return self.state()
                 if not self.controller.pin.verify(payload['pin']):
                     raise BridgeError('invalid_pin', 'Incorrect proctor PIN')
                 if not session.ended:
@@ -534,6 +585,11 @@ class WorkflowBridge(SetupBridge):
             raise BridgeError('geometry_pending', 'Settle the final fullscreen layout before calibration and protected Start')
 
     def readiness(self):
+        live = self.live_teacher
+        self.controller.audio_evidence_consent = bool(self.consent and live and
+            live.consent_accepted and live.consent_acknowledged and live.consent_version == 5)
+        self.controller.authorize_advanced(bool(self.consent and live and
+            live.consent_accepted and live.consent_acknowledged))
         health = self.monitor.health(self.clock.monotonic())
         checks = []
         def check(name, ready, message, enabled=True):
@@ -551,13 +607,17 @@ class WorkflowBridge(SetupBridge):
                          (self.connected_sync.can_start() if self.connected_sync else client.deadline > self.clock.monotonic()))
             check('admission', available, 'Teacher admission and preparation deadline are required')
         check('registration', self.controller.candidate_info is not None, 'Submit candidate details', self.config.registration.enabled)
-        check('reference', self.controller.identity_ready, self.controller.identity_status, self.config.identity.selfie_verification_enabled)
+        check('reference', self.controller.identity_ready, self.controller.identity_status, self.config.identity.selfie_verification_enabled or self.config.advanced.identity_enabled)
+        check('advanced',self.controller.advanced_ready,self.controller.advanced_status,self.config.advanced.enabled)
         check('camera', health.healthy, health.reason or 'Camera and vision pipeline are healthy')
         check('gaze', self.monitor.calibration.ready and not self.flow.active,
               'Session gaze calibration accepted' if self.monitor.calibration.ready else 'Complete session gaze calibration')
         check('devices', not self._scanning and not getattr(self.monitor, '_switching', False), 'Device selection must finish')
         preflight = self.controller.preflight_status()
         check('system', preflight['ready'], preflight.get('reason') or 'Configured system checks completed')
+        if self.config.protection.enabled and self.admission_client and self.admission_client.admission:
+            check('teacher_pin', self.admission_client.admission.get('protection_pin_configured') is True,
+                  'Teacher must configure a protection PIN, then refresh admission')
         if self.electron_protection is not None:
             binding = self.electron_protection.binding_status()
             check('protection', bool(binding.get('ready')), binding.get('error') or 'Independent recovery and window ownership verified')
@@ -690,7 +750,7 @@ class WorkflowBridge(SetupBridge):
             'config_path': str(self.config.source_path or ''),
             'registration': {'enabled': self.config.registration.enabled, 'require_group': self.config.registration.require_group,
                              'candidate': controller.candidate_info, 'complete': not self.config.registration.enabled or controller.candidate_info is not None},
-            'reference': {'enabled': self.config.identity.selfie_verification_enabled, 'ready': controller.identity_ready,
+            'reference': {'enabled': self.config.identity.selfie_verification_enabled or self.config.advanced.identity_enabled, 'advanced': self.config.advanced.identity_enabled, 'ready': controller.identity_ready,
                           'can_capture': controller.identity_can_capture, 'status': controller.identity_status},
             'calibration': self.flow.state(), 'readiness': self.readiness(),
             'session': {'started': session.started, 'ended': session.ended, 'running': session.running,

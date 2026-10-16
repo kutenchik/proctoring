@@ -5,6 +5,8 @@ import base64
 import binascii
 import hashlib
 import hmac
+from proctoring.advanced.settings import consent_version
+from proctoring.domain import EventType
 import json
 import math
 import os
@@ -20,7 +22,7 @@ ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 UUID = re.compile(r"[a-f0-9]{32}\Z")
 SESSION = re.compile(r"session-[a-f0-9]{32}\Z")
 SHA = re.compile(r"[a-f0-9]{64}\Z")
-KINDS = {"session", "events", "summary", "answers", "original_pdf", "reference", "snapshot"}
+KINDS = {"session", "events", "summary", "answers", "original_pdf", "reference", "snapshot", "audio"}
 FORBIDDEN = {"password", "pin", "proctor_pin", "credential", "device_secret", "token", "access_token", "authorization", "api_key", "webhook_token", "telegram_bot_token", "correct_option_ids", "correct_index"}
 
 
@@ -129,7 +131,9 @@ class SyncService:
             attempt, state = self._owned(connection, credential, device_secret)
             self._session(state, session_id)
             live = connection.execute("SELECT * FROM live_attempts WHERE attempt_id=?", (attempt["id"],)).fetchone()
-            if live and (live["session_id"] != session_id or live["consent_version"] != 3 or live["consent_accepted_at"] is None):
+            expected = consent_version(json.loads(attempt["policy_snapshot"]))
+            if expected >= 4 and not live: raise Problem("consent_required", "Current monitoring consent is required", 409)
+            if live and (live["session_id"] != session_id or live["consent_version"] != expected or live["consent_accepted_at"] is None):
                 raise Problem("consent_required", "Explicit full exam-monitor viewing consent is required before start", 409)
             if state["ended_at"] is not None or state["lifecycle"] in ("interrupted", "recovery_authorized"):
                 raise Problem("start_blocked", "Attempt is ended or requires teacher-authorized recovery", 409)
@@ -262,29 +266,33 @@ class SyncService:
                     connection.execute("INSERT INTO sync_records VALUES (?,?,?,?,?)", (attempt["id"], entry["sequence"], encoded(record), sha, self.clock()))
             return {"accepted_sequences": [entry["sequence"] for entry in records]}
 
-    def snapshot_declare(self, credential, device_secret, data):
+    def snapshot_declare(self, credential, device_secret, data, *, audio=False):
+        kind = "audio" if audio else "snapshot"
+        table = "event_audio" if audio else "event_snapshots"
         """Provisional file declaration; never ends an attempt or issues a receipt."""
         event_id = opaque(data.get("event_id"))
-        item_id = "event_" + hashlib.sha256(event_id.encode()).hexdigest()
-        path = "snapshots/" + event_id + ".jpg"
+        item_id = ("audio_" if audio else "event_") + hashlib.sha256(event_id.encode()).hexdigest()
+        path = ("audio/" + event_id + ".wav") if audio else ("snapshots/" + event_id + ".jpg")
         size, sha = data.get("size"), data.get("sha256")
-        if type(size) is not int or not 0 < size <= 8*1024*1024 or not isinstance(sha, str) or not SHA.fullmatch(sha):
+        if type(size) is not int or not 0 < size <= (480044 if audio else 8*1024*1024) or not isinstance(sha, str) or not SHA.fullmatch(sha):
             raise Problem("invalid_snapshot", "Snapshot requires bounded size and SHA-256")
         with self.database.connect(write=True) as connection:
             attempt, state = self._owned(connection, credential, device_secret, evidence_only=True)
             self._session(state, data.get("session_id"))
-            if not json.loads(attempt["policy_snapshot"])["save_snapshots"]:
+            policy = json.loads(attempt["policy_snapshot"])
+            if audio: self._audio_consent(connection, attempt, state)
+            if not audio and not policy["save_snapshots"]:
                 raise Problem("policy_conflict", "Event snapshots are disabled", 409)
             consent = connection.execute("SELECT * FROM live_attempts WHERE attempt_id=?", (attempt["id"],)).fetchone()
-            if not consent or consent["session_id"] != state["session_id"] or consent["consent_version"] != 3 or consent["consent_accepted_at"] is None:
+            if not consent or consent["session_id"] != state["session_id"] or consent["consent_version"] != consent_version(json.loads(attempt["policy_snapshot"])) or consent["consent_accepted_at"] is None:
                 raise Problem("snapshot_consent_required", "Early camera evidence requires consent version 3", 403)
             records = connection.execute("SELECT payload FROM sync_records WHERE attempt_id=? AND json_extract(payload,'$.event_id')=? ORDER BY sequence", (attempt["id"], event_id))
-            associated = any((r := json.loads(row[0])).get("snapshot_path") == path and r.get("event_type") and r.get("state") != "candidate" for row in records)
+            associated = any((r := json.loads(row[0])).get(kind+"_path") == path and (r.get("event_type") == EventType.VOICE_DETECTED.value if audio else r.get("event_type")) and (not audio or r.get("record_kind") == "review_event") and r.get("state") != "candidate" for row in records)
             if not associated:
                 raise Problem("snapshot_event_required", "Persist the original associated event first", 409)
             old = connection.execute("SELECT * FROM sync_files WHERE attempt_id=? AND item_id=?", (attempt["id"], item_id)).fetchone()
             if old:
-                if old["size"] != size or old["sha256"] != sha or old["relative_path"] != path or old["kind"] != "snapshot":
+                if old["size"] != size or old["sha256"] != sha or old["relative_path"] != path or old["kind"] != kind:
                     raise Problem("file_conflict", "Accepted snapshot identity/content is immutable", 409)
             else:
                 if state["current_manifest"] or state["lifecycle"] == "synchronized":
@@ -292,10 +300,19 @@ class SyncService:
                 count, total = connection.execute("SELECT COUNT(*),COALESCE(SUM(size),0) FROM sync_files WHERE attempt_id=?", (attempt["id"],)).fetchone()
                 if count >= 1900 or total+size > 240*1024*1024:
                     raise Problem("bundle_limit", "Provisional evidence limit reached", 409)
-                connection.execute("INSERT INTO sync_files(attempt_id,item_id,kind,relative_path,size,sha256) VALUES (?,?,?,?,?,?)", (attempt["id"],item_id,"snapshot",path,size,sha))
-                connection.execute("INSERT INTO event_snapshots VALUES (?,?,?)", (attempt["id"],event_id,item_id))
+                connection.execute("INSERT INTO sync_files(attempt_id,item_id,kind,relative_path,size,sha256) VALUES (?,?,?,?,?,?)", (attempt["id"],item_id,kind,path,size,sha))
+                connection.execute(f"INSERT INTO {table} VALUES (?,?,?)", (attempt["id"],event_id,item_id))
             row = connection.execute("SELECT received_bytes,complete FROM sync_files WHERE attempt_id=? AND item_id=?", (attempt["id"],item_id)).fetchone()
             return {"item_id":item_id,"received_bytes":row[0],"complete":bool(row[1])}
+
+    @staticmethod
+    def _audio_consent(connection, attempt, state):
+        policy = json.loads(attempt['policy_snapshot']).get('monitoring_policy', {}).get('values', {})
+        if not policy.get('audio_evidence.enabled') or not policy.get('audio.enabled'):
+            raise Problem('policy_conflict', 'Audio evidence is disabled', 409)
+        consent = connection.execute('SELECT * FROM live_attempts WHERE attempt_id=?', (attempt['id'],)).fetchone()
+        if not consent or consent['session_id'] != state['session_id'] or consent['consent_version'] != 5 or consent['consent_accepted_at'] is None:
+            raise Problem('audio_consent_required', 'Audio evidence requires consent v5', 403)
 
     def _manifest(self, attempt, state, manifest):
         if not isinstance(manifest, dict) or manifest.get("version") != 1 or manifest.get("attempt_id") != attempt["id"]:
@@ -328,7 +345,7 @@ class SyncService:
                 raise Problem("invalid_manifest", "Two items cannot claim the same local file")
             paths.add(path)
             kinds.setdefault(item["kind"], []).append(item)
-            extensions = {"session": ".json", "summary": ".json", "answers": ".json", "events": ".jsonl", "original_pdf": ".pdf", "reference": ".jpg", "snapshot": ".jpg"}
+            extensions = {"session": ".json", "summary": ".json", "answers": ".json", "events": ".jsonl", "original_pdf": ".pdf", "reference": ".jpg", "snapshot": ".jpg", "audio": ".wav"}
             if PurePosixPath(path).suffix.lower() != extensions[item["kind"]] or path.lower().endswith("config.json"):
                 raise Problem("invalid_file_type", "File extension does not match an allowed evidence kind")
             if item["status"] not in ("present", "missing_error", "disabled", "optional_absent"):
@@ -337,9 +354,13 @@ class SyncService:
                 raise Problem("invalid_manifest", "Error metadata must be a bounded description")
             if item["status"] == "missing_error" and not item["error"]:
                 raise Problem("invalid_manifest", "Missing material must identify its production error")
+            if item["kind"] == "audio" and not item["required"]:
+                raise Problem("invalid_audio", "Audio production cannot be omitted from receipt requirements")
             if item["status"] == "present":
                 if type(item["size"]) is not int or not 0 < item["size"] <= 64 * 1024 * 1024 or not isinstance(item["sha256"], str) or not SHA.fullmatch(item["sha256"]):
                     raise Problem("invalid_manifest", "Present files require a bounded size and SHA-256")
+                if item["kind"] == "audio" and (not item["required"] or item["size"] > 480044 or not re.fullmatch(r"audio/[A-Za-z0-9_-]{1,96}\.wav", path)):
+                    raise Problem("invalid_audio", "Audio must be bounded required canonical WAV evidence")
                 total += item["size"]
             elif item["size"] is not None or item["sha256"] is not None:
                 raise Problem("invalid_manifest", "Absent files must not claim a size or checksum")
@@ -354,7 +375,7 @@ class SyncService:
             entries = kinds.get(kind, [])
             if not entries or not any(item["required"] for item in entries) or (kind != "reference" and len(entries) != 1):
                 raise Problem("missing_required_kind", f"Manifest must declare required {kind} material")
-        for kind in KINDS - {"snapshot", "reference"}:
+        for kind in KINDS - {"snapshot", "reference", "audio"}:
             if len(kinds.get(kind, [])) > 1:
                 raise Problem("invalid_manifest", "Singleton evidence kind declared more than once")
         policy = json.loads(attempt["policy_snapshot"])
@@ -370,6 +391,14 @@ class SyncService:
         with self.database.connect(write=True) as connection:
             attempt, state = self._owned(connection, credential, device_secret, evidence_only=True)
             ended = self._manifest(attempt, state, manifest)
+            if any(i['kind'] == 'audio' for i in manifest['items']):
+                self._audio_consent(connection, attempt, state)
+                for item in manifest['items']:
+                    if item['kind'] != 'audio': continue
+                    event_id = PurePosixPath(item['relative_path']).stem
+                    rows = connection.execute("SELECT payload FROM sync_records WHERE attempt_id=? AND json_extract(payload,'$.event_id')=?", (attempt['id'], event_id))
+                    if not any((r := json.loads(row[0])).get('record_kind') == 'review_event' and r.get('event_type') == EventType.VOICE_DETECTED.value and (r.get('audio_path') == item['relative_path'] or (item['status']=='missing_error' and r.get('audio_status')=='unavailable')) for row in rows):
+                        raise Problem('audio_event_required', 'Original sound event must identify the clip', 409)
             sha = checksum(manifest)
             if state["current_manifest"] == sha:
                 return {"manifest_sha256": sha}
@@ -386,7 +415,7 @@ class SyncService:
                 if manifest["record_count"] != previous["record_count"] or manifest["identity_required"] != previous["identity_required"]:
                     raise Problem("manifest_conflict", "Manifest repair cannot weaken required evidence", 409)
             current_items = {i["id"]: i for i in manifest["items"]}
-            for early in connection.execute("SELECT f.* FROM sync_files f JOIN event_snapshots e ON e.attempt_id=f.attempt_id AND e.item_id=f.item_id WHERE f.attempt_id=?", (attempt["id"],)):
+            for early in connection.execute("SELECT f.* FROM sync_files f JOIN (SELECT * FROM event_snapshots UNION ALL SELECT * FROM event_audio) e ON e.attempt_id=f.attempt_id AND e.item_id=f.item_id WHERE f.attempt_id=?", (attempt["id"],)):
                 final = current_items.get(early["item_id"], {})
                 if final.get("status") != "present" or any(final.get(k) != early[k] for k in ("kind","relative_path","size","sha256")):
                     raise Problem("file_conflict", "Final manifest must retain every provisional snapshot unchanged", 409)
@@ -432,6 +461,10 @@ class SyncService:
             prefix = source.read(8)
         if kind in ("reference", "snapshot") and not prefix.startswith(b"\xff\xd8\xff"):
             raise Problem("invalid_file_type", "Image evidence must be a JPEG")
+        if kind == "audio":
+            from proctoring.audio.evidence import validate_wav
+            try: validate_wav(path)
+            except (OSError, ValueError): raise Problem('invalid_audio', 'Audio must be valid bounded mono PCM16 WAV at 16 kHz') from None
         if kind == "original_pdf" and not prefix.startswith(b"%PDF-"):
             raise Problem("invalid_file_type", "Original report must be a PDF")
         if kind in ("reference", "snapshot"):
@@ -478,7 +511,7 @@ class SyncService:
             attempt, state = self._owned(connection, credential, device_secret, evidence_only=True)
             if provisional:
                 self._session(state, data.get("session_id"))
-                early = connection.execute("SELECT 1 FROM event_snapshots WHERE attempt_id=? AND item_id=?", (attempt["id"], item_id)).fetchone()
+                early = connection.execute("SELECT 1 FROM (SELECT * FROM event_snapshots UNION ALL SELECT * FROM event_audio) WHERE attempt_id=? AND item_id=?", (attempt["id"], item_id)).fetchone()
                 if not early or state["current_manifest"]:
                     raise Problem("bundle_frozen", "Provisional upload is not available", 409)
             elif not state["current_manifest"] or state["current_manifest"] != data.get("manifest_sha256"):
@@ -621,8 +654,12 @@ class SyncService:
         reference(session.get("reference_face") or summary.get("reference_face"), "reference")
         for event in summary.get("events", []):
             reference(event.get("snapshot_path"), "snapshot")
+            reference(event.get("audio_path"), "audio")
+            if event.get("audio_status") in ("pending", "unavailable"):
+                raise Problem("audio_incomplete", "Audio production is incomplete; retain local evidence", 409)
         for raw in connection.execute("SELECT payload FROM sync_records WHERE attempt_id=?", (attempt["id"],)):
             reference(json.loads(raw[0]).get("snapshot_path"), "snapshot")
+            reference(json.loads(raw[0]).get("audio_path"), "audio")
         if summary.get("storage_error"):
             raise Problem("production_error", "Recorded journal/storage failure requires explicit recovery before complete receipt", 409)
         if summary.get("snapshot_errors"):
@@ -747,7 +784,7 @@ class SyncService:
         path = self.file_path(owner, attempt_id, item_id)
         with self.database.connect() as connection:
             row = connection.execute("SELECT kind,relative_path FROM sync_files WHERE attempt_id=? AND item_id=?", (attempt_id, item_id)).fetchone()
-        media = "application/pdf" if row["kind"] == "original_pdf" else "image/jpeg" if row["kind"] in ("snapshot", "reference") else "application/json" if row["kind"] != "events" else "application/x-ndjson"
+        media = "audio/wav" if row["kind"] == "audio" else "application/pdf" if row["kind"] == "original_pdf" else "image/jpeg" if row["kind"] in ("snapshot", "reference") else "application/json" if row["kind"] != "events" else "application/x-ndjson"
         return path, media, PurePosixPath(row["relative_path"]).name
 
     def delete_materials(self, owner, attempt_id, data, *, retention=False):
@@ -775,6 +812,7 @@ class SyncService:
             now = self.clock()
             connection.execute("UPDATE sync_attempts SET deleted_at=?,checkpoint=NULL,deletion_pending=0 WHERE attempt_id=?", (now, attempt_id))
             connection.execute("DELETE FROM sync_records WHERE attempt_id=?", (attempt_id,))
+            connection.execute("DELETE FROM event_audio WHERE attempt_id=?", (attempt_id,))
             connection.execute("DELETE FROM event_snapshots WHERE attempt_id=?", (attempt_id,))
             connection.execute("DELETE FROM sync_files WHERE attempt_id=?", (attempt_id,))
             connection.execute("DELETE FROM sync_manifests WHERE attempt_id=?", (attempt_id,))

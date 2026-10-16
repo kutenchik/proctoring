@@ -7,6 +7,14 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def distribution_identity():
+    if not is_frozen():
+        return 'source'
+    import hashlib
+    inventory = Path(sys.executable).resolve().parents[2] / 'PACKAGE-INVENTORY.json'
+    return hashlib.sha256(inventory.read_bytes()).hexdigest()
+
+
 def resource_root() -> Path:
     if is_frozen():
         return Path(sys._MEIPASS).resolve()

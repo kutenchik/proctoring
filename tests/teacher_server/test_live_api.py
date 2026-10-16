@@ -18,8 +18,14 @@ from test_live import status, jpeg_frame
 
 @pytest.fixture
 def network(app):
+    with running_network(app) as value:
+        yield value
+
+
+@contextmanager
+def running_network(app, port=0):
     listener = socket.socket()
-    listener.bind(('127.0.0.1', 0))
+    listener.bind(('127.0.0.1', port))
     port = listener.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port, log_level='error',
         access_log=False, proxy_headers=False, ws='websockets-sansio', ws_max_size=393216,

@@ -16,7 +16,7 @@ export interface HostBinding {
 export interface ProtectionState {
   enabled: boolean; requested?: boolean; reason: string;
   state?: 'disabled' | 'awaiting_audit' | 'preparing' | 'arming' | 'active' | 'releasing' | 'released' | 'fault';
-  audit?: { valid: boolean; message: string; path: string }; challenge?: LeaseChallenge | null;
+  audit?: { required?: boolean; valid: boolean; message: string; path: string }; challenge?: LeaseChallenge | null;
 }
 export interface Bounds { x: number; y: number; width: number; height: number }
 export interface DisplayGeometry {
@@ -48,7 +48,7 @@ export interface WorkflowState {
   version: 2; step: 'setup' | 'calibration' | 'ready' | 'exam' | 'paused' | 'summary'; revision: number; snapshot_seq: number;
   session_id: string | null; config_path: string;
   registration: { enabled: boolean; require_group: boolean; candidate: { first_name: string; last_name: string; group_id: string; full_name?: string; student_id?: string } | null; complete: boolean };
-  reference: { enabled: boolean; ready: boolean; can_capture: boolean; status: string };
+  reference: { advanced?: boolean; enabled: boolean; ready: boolean; can_capture: boolean; status: string };
   calibration: CalibrationState;
   readiness: { ready: boolean; checks: { id: string; status: 'ready' | 'blocked' | 'not_enabled'; message: string; required?: boolean }[] };
   session: { started: boolean; started_at?: string | null; ended: boolean; running: boolean; elapsed_seconds: number; remaining_seconds: number; duration_seconds: number; pause_reasons: string[]; monitoring_healthy: boolean; recovery_pin_required: boolean; end_reason: string | null };
@@ -88,7 +88,8 @@ export interface BackendState {
 }
 export interface LiveTeacherState {
   connection: 'offline'|'reconnecting'|'online'; error: string|null;
-  consent: {accepted:boolean;version:3;acknowledged:boolean};
+  advanced?: Record<string,string>;
+  consent: {accepted:boolean;version:3|4|5;acknowledged:boolean;features?:string[]};
   viewing: {viewer_id:string|null;state:'stopped'|'starting'|'recovering'|'live'|'degraded'|'unavailable';transport:'direct'|'relay'|null;reason:string|null};
   screen_diagnostic?: import('../../shared/screen-diagnostic').ScreenDiagnostic|null;
   messages: {command_id:string;teacher_id:string;text:string;timestamp:string}[];
@@ -100,6 +101,7 @@ export interface PreviewFrame {
   width: number; height: number; mime: 'image/jpeg'; jpeg_base64: string; overlays: unknown[];
 }
 export interface AdmissionState {
+  pin_request?: number; pin_status?: 'pending'|'authorized'|'rejected'|null;
   enabled: boolean; server_url: string; verified_server: string; busy: string | null;
   error: string | null; admitted: boolean; policy_applied: boolean; attempt_id: string | null;
   exam_title: string; preparation_remaining_seconds: number; preparation_deadline: string | null;

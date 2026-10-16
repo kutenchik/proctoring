@@ -184,14 +184,20 @@ class Protocol:
                     return failure(request_id, 'duplicate_id', 'Request ID already belongs to another command')
                 return json.loads(response)
             try:
+                from .diagnostics import emit
+                if request['command'] == 'camera.start':
+                    emit('camera_received')
                 result = self.dispatch(request['command'], request['payload'])
                 response = {'version': 1, 'id': request_id, 'ok': True,
                             'result': result.state if isinstance(result, DispatchResult) else result}
                 if isinstance(result, DispatchResult):
                     response['data'] = result.data
             except BridgeError as error:
+                if request['command'] == 'camera.start':
+                    emit('camera_failed', error=error)
                 response = failure(request_id, error.code, str(error))
-            except Exception:
+            except Exception as error:
+                emit('camera_failed' if request['command'] == 'camera.start' else 'request_failed', error=error)
                 # Driver/config exception text may contain paths or secrets.
                 response = failure(request_id, 'backend_error', 'Desktop operation failed; synchronize the current state before retrying')
             encoded = json.dumps(response, allow_nan=False, separators=(',', ':'))

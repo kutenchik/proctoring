@@ -30,7 +30,7 @@ def test_public_templates_safe_and_resource_paths_are_explicit():
         assert data["exam"]["quiz_path"] == "@bundle/assets/quiz.json"
         assert data["vision"]["yolo_model"] == "@bundle/models/yolo11n.onnx"
         assert data["storage"]["sessions_dir"] == "sessions"
-        assert data["protection"]["validation_report"] == "audits/electron-recovery.json"
+        assert data["protection"]["validation_report"] == "audits/startup-current.json"
         assert not data["remote"]["enabled"]
         assert not data["remote"]["telegram_bot_token"]
 
@@ -46,6 +46,7 @@ def test_lock_is_fully_pinned_and_retains_repository_numpy():
     assert pins["numpy"] == "1.26.4"
     assert pins["PyInstaller"] == "6.22.3"
     assert pins["requests"] == "2.34.2"
+    assert pins["websockets"] == "15.0.1"
 
 
 def test_versioned_archive_keeps_complete_inspection_name(tmp_path):
@@ -87,7 +88,7 @@ def test_inventory_and_runtime_manifest_use_relocation_safe_paths(tmp_path, monk
     (package / "resources/default.example.toml").write_text("# safe", encoding="utf-8")
     builder.write_manifests(package, {"numpy": "1.26.4"})
     manifest = json.loads((package / "resources/package-build.json").read_text())
-    assert manifest == {"schema": 1, "build_kind": "packaged", "files": ["LocalProctoring-Electron.exe"]}
+    assert manifest == {"schema": 1, "build_kind": "packaged", "files": ["LocalProctoring-Electron.exe", "resources/default.example.toml"]}
     inventory = json.loads((package / "PACKAGE-INVENTORY.json").read_text())
     assert inventory["status"] == "UNVALIDATED"
     assert all(not Path(row["path"]).is_absolute() for row in inventory["files"])
@@ -104,7 +105,7 @@ def test_frontend_allowlist_rejects_unexpected_data(tmp_path):
 def test_electron_entrypoints_include_separately_loaded_audit_and_exclude_other_build_files(tmp_path):
     source, output = tmp_path / "build-electron", tmp_path / "output"
     source.mkdir()
-    for filename in ("main.cjs", "preload.cjs", "recovery-renderer.js"):
+    for filename in builder.ELECTRON_APP_FILES:
         (source / filename).write_text("// trusted generated code", encoding="utf-8")
     (source / "recovery-renderer.html").write_text('<script src="recovery-renderer.js"></script>', encoding="utf-8")
     (source / "private-audit-results.json").write_text("{}", encoding="utf-8")
@@ -113,7 +114,7 @@ def test_electron_entrypoints_include_separately_loaded_audit_and_exclude_other_
     assert (output / "recovery-renderer.js").is_file()
     assert not (output / "private-audit-results.json").exists()
     manifest = builder.inspect_files(output)
-    assert len(manifest) == 4
+    assert len(manifest) == len(builder.ELECTRON_APP_FILES)
 
 
 def test_missing_audit_renderer_aborts_packaging(tmp_path):
@@ -145,7 +146,7 @@ def test_public_bundle_config_resolves_assets_without_relocating_writable_paths(
     assert config.vision.yolo_model == bundle / "models/yolo11n.onnx"
     assert config.vision.face_model == bundle / "models/face_landmarker.task"
     assert config.sessions_dir == settings.parent / "sessions"
-    assert config.protection.validation_report == settings.parent / "audits/electron-recovery.json"
+    assert config.protection.validation_report == settings.parent / "audits/startup-current.json"
 
 
 @pytest.mark.parametrize("resource", ["", "../outside", "models/../../outside", "models/../quiz.json",

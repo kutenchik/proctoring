@@ -33,6 +33,11 @@ def install_sync_routes(app, service, sync, owner, credential):
     def snapshot_declare(request: Request, data: dict):
         return sync.snapshot_declare(*student(request), data)
 
+    @app.post(prefix + "/student/sync/audio")
+    def audio_declare(request: Request, data: dict):
+        return sync.snapshot_declare(*student(request), data, audio=True)
+
+    @app.post(prefix + "/student/sync/audio/{item_id}/chunks")
     @app.post(prefix + "/student/sync/snapshots/{item_id}/chunks")
     def snapshot_chunk(request: Request, item_id: str, data: dict):
         result = sync.chunk(*student(request), item_id, data, provisional=True)
@@ -72,7 +77,7 @@ def install_sync_routes(app, service, sync, owner, credential):
     @app.get(prefix + "/attempts/{attempt_id}/evidence/{item_id}")
     def evidence(request: Request, attempt_id: str, item_id: str):
         path, media, name = sync.evidence_file(owner(request), attempt_id, item_id)
-        return FileResponse(path, media_type=media, filename=name, headers={"Cache-Control": "no-store"})
+        return FileResponse(path, media_type=media, filename=name, content_disposition_type="inline" if media == "audio/wav" else "attachment", headers={"Cache-Control": "no-store"})
 
     @app.post(prefix + "/attempts/{attempt_id}/materials/delete")
     def delete(request: Request, attempt_id: str, data: dict):

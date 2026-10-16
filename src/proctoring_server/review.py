@@ -9,7 +9,7 @@ from .service import Problem, encoded, identifier, iso
 
 DECISIONS = {'not_reviewed', 'confirmed', 'false_positive', 'insufficient_evidence'}
 CONCLUSIONS = {'none_confirmed', 'violation_confirmed', 'insufficient_evidence'}
-BEHAVIORAL = {'phone_visible', 'phone_raised', 'second_person', 'face_absent',
+BEHAVIORAL = {'remote_access_detected','presentation_attack_suspected','identity_mismatch_suspected','phone_visible', 'phone_raised', 'second_person', 'face_absent',
               'gaze_down', 'gaze_left', 'gaze_right', 'gaze_deviation', 'head_down',
               'voice_detected', 'impersonation_suspected', 'earphone_suspected'}
 
@@ -41,6 +41,12 @@ def _instant(value):
         return None
 
 
+def audio_projection(raw, files):
+    file = next((f for f in files if f.get('kind') == 'audio' and f.get('relative_path') == raw.get('audio_path') and f.get('complete')), None)
+    status = 'available' if file else 'unavailable' if raw.get('audio_status') == 'unavailable' else 'pending' if raw.get('audio_status') in ('pending','ready') else 'not_applicable'
+    return {'status':status, 'item_id':file['id'] if file else None, 'reason':raw.get('audio_reason')}
+
+
 def event_projection(records, files):
     """Latest presentation per stable event; the raw append-only rows stay intact."""
     events = {}
@@ -66,7 +72,7 @@ def event_projection(records, files):
         events[event_id] = {'event_id': event_id, 'event_type': kind, 'timestamp': timestamp,
                             'duration_seconds': duration,
                             'category': 'behavioral' if kind.lower() in BEHAVIORAL else 'technical',
-                            'raw': raw, 'files': matching}
+                            'raw': raw, 'files': matching, 'audio': audio_projection(raw, files)}
     return sorted(events.values(), key=lambda e: (str(e['timestamp'] or ''), e['event_id']))
 
 

@@ -82,6 +82,13 @@ class ProtectedEndpoint(AuditEndpoint):
             self.client._test_lease_seconds=maximum
             self.client.arm()  # Current machine, policy and build Gate 3A validation is mandatory.
             return self.state()
+        if name=='test.foreground':
+            if payload: raise ValueError('Unexpected foreground fields')
+            binding=self.client.binding
+            if not binding or not binding.valid(): raise ValueError('Verified fixture binding required')
+            # Read-only precondition: never arm, inject input or steal focus here.
+            current=int(binding.native.u.GetForegroundWindow() or 0)
+            return {'owned_foreground':binding.allows(current)}
         if name=='test.shortcut':
             if set(payload)!={'name'} or not isinstance(payload['name'],str) or payload['name'] not in SHORTCUTS:
                 raise ValueError('Only named existing-policy shortcuts may be exercised')

@@ -49,7 +49,7 @@ records=[]
 for index,event_type in enumerate(["phone_visible","phone_visible","gaze_down","monitoring_failure"]):
     records.append({"session_id":session_id,"event_id":f"event-{index+1}","event_type":event_type,"state":"closed","timestamp":iso(now-50+index*8),"start_timestamp":iso(now-50+index*8),"duration_seconds":2.0,**({"snapshot_path":snapshot_path} if index<2 else {})})
 sync.records_upload(credential,device_secret,{"session_id":session_id,"records":[{"sequence":i,"record":record} for i,record in enumerate(records)]})
-summary={"session_id":session_id,"connected_attempt":{"attempt_id":attempt_id},"ended_at":iso(now),"end_reason":"submitted","elapsed_seconds":60,"remaining_seconds":540,"score":0,"total_questions":1,"events":records,"storage_error":None,"snapshot_errors":[]}
+summary={"started_at":iso(now-60),"session_id":session_id,"connected_attempt":{"attempt_id":attempt_id},"ended_at":iso(now),"end_reason":"submitted","elapsed_seconds":60,"remaining_seconds":540,"score":0,"total_questions":1,"events":records,"storage_error":None,"snapshot_errors":[]}
 image=Image.new("RGB",(400,220),(234,234,224));ImageDraw.Draw(image).text((20,95),"SYNTHETIC TEST EVIDENCE",fill=(45,73,49));jpeg=BytesIO();image.save(jpeg,"JPEG")
 pdf=BytesIO();canvas=Canvas(pdf);canvas.drawString(72,750,"Synthetic original report - unchanged");canvas.save()
 files={

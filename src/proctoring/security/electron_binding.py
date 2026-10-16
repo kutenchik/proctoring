@@ -32,6 +32,7 @@ class NativeIdentity:
             (self.k, 'WaitForSingleObject', [wintypes.HANDLE, wintypes.DWORD], wintypes.DWORD),
             (self.k, 'CloseHandle', [wintypes.HANDLE], wintypes.BOOL),
             (self.k, 'TerminateProcess', [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
+            (self.k, 'GetExitCodeProcess', [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
             (self.k, 'QueryFullProcessImageNameW', [wintypes.HANDLE,wintypes.DWORD,wintypes.LPWSTR,ctypes.POINTER(wintypes.DWORD)],wintypes.BOOL),
             (self.k, 'CreateMutexW', [ctypes.c_void_p,wintypes.BOOL,wintypes.LPCWSTR],wintypes.HANDLE),
             (self.k, 'ReleaseMutex', [wintypes.HANDLE],wintypes.BOOL),
@@ -67,6 +68,14 @@ class NativeIdentity:
         if not self.k.QueryFullProcessImageNameW(handle,0,text,ctypes.byref(size)):
             raise ctypes.WinError(ctypes.get_last_error())
         return text.value
+
+    def exit_code(self, handle):
+        if self.alive(handle):
+            return None
+        code = wintypes.DWORD()
+        if not self.k.GetExitCodeProcess(handle, ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return code.value
 
     def close(self, handle): self.k.CloseHandle(handle)
     def window_owner(self, hwnd):

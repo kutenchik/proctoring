@@ -192,12 +192,15 @@ class ConnectedWorkflow:
         if not row or not self.reconciled:
             return False
         if row['phase'] == 'unexpected_interruption':
+            if self.bridge.config.advanced.identity_enabled: return False
             recovery = self.client.admission.get('recovery') or {}
             return self.recovery_authorized or recovery.get('state') in ('granted', 'authorized', 'consumed')
         return self.client.start_authorized or self.client.deadline > self.bridge.clock.monotonic()
 
     def request_start(self):
         row = self.row()
+        if row['phase']=='unexpected_interruption' and self.bridge.config.advanced.identity_enabled:
+            raise ValueError('Local biometric reference was lost; teacher must authorize a replacement attempt')
         if row['phase'] == 'unexpected_interruption':
             recovery = self.client.admission.get('recovery') or {}
             grant = recovery.get('grant_id')
@@ -210,6 +213,8 @@ class ConnectedWorkflow:
 
     def before_start(self):
         row, c = self.row(), self.bridge.controller
+        if row['phase']=='unexpected_interruption' and self.bridge.config.advanced.identity_enabled:
+            raise ValueError('Local biometric reference was lost; teacher must authorize a replacement attempt')
         if row['phase'] == 'unexpected_interruption':
             if not self.recovery_authorized:
                 raise ValueError('teacher_recovery_required')
@@ -252,7 +257,20 @@ class ConnectedWorkflow:
                 c.events._events.append(event)
             else:
                 c.security_events.append(event)
-            c._event_metadata[kind] = {k: v for k, v in original.items() if k in ('severity','review','description')}
+            c._event_metadata[kind] = {k: v for k, v in original.items() if k in ('severity','review','description','event_type','audio_status','audio_path','audio_reason')}
+        # Recover a file atomically published before the journal result, or
+        # explicitly close a lost in-memory clip. Never invent successful audio.
+        for event_id, metadata in list(c._event_metadata.items()):
+            if metadata.get('audio_status') == 'pending':
+                from .sync import evidence_path
+                from ..audio.evidence import validate_wav
+                relative = 'audio/'+event_id+'.wav'
+                try:
+                    validate_wav(evidence_path(c.store.path, relative))
+                except (OSError, ValueError):
+                    c._audio_result(event_id, None, 'application_interrupted', 'unavailable')
+                else:
+                    c._audio_result(event_id, relative, 'application_interrupted', 'ready')
         c._snapshots = snapshots
 
     def terminal(self):
@@ -334,6 +352,10 @@ class ConnectedWorkflow:
     def interrupt(self, reason):
         c = self.bridge.controller
         if c.session.started and not c.session.ended:
+            if c.audio_evidence is not None:
+                c.audio_evidence.close()
+                c.audio_evidence.thread.join(.5)
+                c._drain_audio_evidence()
             c.session._freeze(c.clock.monotonic())
             c._write_events(c.events.close_all('application_interrupted'))
             if c.audio_events:

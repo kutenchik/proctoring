@@ -104,10 +104,15 @@ export function validateState(input: unknown): BackendState {
   if (input.live_teacher !== undefined) {
     const live = input.live_teacher;
     const onlyKeys = (v:Record<string,unknown>,keys:string[]) => Object.keys(v).every(k => keys.includes(k));
-    if (!object(live) || !onlyKeys(live,['connection','error','consent','viewing','messages','display','monitoring_outage','screen_diagnostic']) ||
+    if (!object(live) || !onlyKeys(live,['connection','error','consent','viewing','messages','display','monitoring_outage','screen_diagnostic','advanced']) ||
+        (live.advanced !== undefined && (!object(live.advanced) || !onlyKeys(live.advanced,['remote','worker','identity','liveness']) ||
+          !Object.values(live.advanced).every(text))) ||
         (live.screen_diagnostic != null && !validScreenDiagnostic(live.screen_diagnostic)) ||
         !['offline','reconnecting','online'].includes(String(live.connection)) || !nullableText(live.error) ||
-        !object(live.consent) || !onlyKeys(live.consent,['accepted','version','acknowledged']) || live.consent.version !== 3 ||
+        !object(live.consent) || !onlyKeys(live.consent,['accepted','version','acknowledged','features']) || ![3,4,5].includes(live.consent.version as number) ||
+        (live.consent.features !== undefined && (!Array.isArray(live.consent.features) || live.consent.features.length > 4 ||
+          !live.consent.features.every(f => ['remote','liveness','identity','audioEvidence'].includes(f)) ||
+          new Set(live.consent.features).size !== live.consent.features.length)) ||
         typeof live.consent.accepted !== 'boolean' || typeof live.consent.acknowledged !== 'boolean' ||
         !object(live.viewing) || !onlyKeys(live.viewing,['viewer_id','state','transport','reason']) ||
         !nullableText(live.viewing.viewer_id) || !nullableText(live.viewing.reason) ||

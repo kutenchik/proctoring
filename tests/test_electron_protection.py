@@ -195,6 +195,24 @@ def test_camera_status_is_not_a_control_lease_input(helper):
         assert runtime.lease.armed  # No CV/frame-health dependency exists.
 
 
+@pytest.mark.parametrize('competing_reason',[None,'foreground_containment_failed'])
+def test_short_maximum_lease_with_healthy_progress_preserves_first_release(helper,competing_reason):
+    runtime,clock,native,events=helper
+    progress(runtime)
+    runtime.command({'command':'electron_enable','blocking':True,'max_session_seconds':2.})
+    assert runtime.lease.armed
+    for n in range(2,6):
+        clock.now+=.5
+        if not runtime.terminal: progress(runtime,n)
+        if n==3 and competing_reason: runtime.release(competing_reason)
+        runtime.tick()
+    expected=competing_reason or 'lease_expired'
+    assert runtime.terminal and not runtime.lease.armed and not native.lock
+    assert runtime.lease.reason==expected
+    for _ in range(3): runtime.command({'command':'status'})
+    assert events[-1]['reason']==expected and events[-1]['hook_installed'] is False
+
+
 def test_native_emergency_removes_hook_before_event_and_defers_child_join(helper):
     runtime,clock,native,events=helper; arm(runtime); backend=runtime.backend; guardian=runtime.guardian
     runtime.emit=lambda value: (events.append(value),pytest.fail('hook still installed') if backend.hook_installed else None)
@@ -312,6 +330,35 @@ def adapter(monkeypatch):
     monkeypatch.setattr(client,'_terminate_owned_helper',lambda:runtime.release('helper_error'))
     yield client,runtime,allowed,messages
     runtime.release('shutdown'); runtime.finish_cleanup()
+
+
+def test_no_audit_edition_keeps_resources_progress_and_emergency_gates(adapter):
+    from dataclasses import replace
+    client,runtime,allowed,messages=adapter
+    client.config=replace(client.config,require_recovery_audit=False)
+    def forbidden_audit(*args): raise AssertionError('No-audit edition must not read an audit')
+    client.audit_validator=forbidden_audit
+    client.configure_host(payload())
+    assert not client._audit_valid
+    assert client.public_state()['audit']['required'] is False
+    with pytest.raises(RuntimeError,match='Fresh trusted'):client.arm()
+    progress(runtime)
+    client.arm()
+    assert client.armed and runtime.lease.blocking_enabled
+    runtime.emergency()
+    assert not client.armed and runtime.terminal
+    assert not runtime.backend
+
+
+def test_no_audit_edition_still_rejects_changed_resources(adapter):
+    from dataclasses import replace
+    client,runtime,allowed,messages=adapter
+    client.config=replace(client.config,require_recovery_audit=False)
+    client.configure_host(payload());progress(runtime)
+    def changed(*args): raise ValueError('resources changed')
+    client.identity_factory=changed
+    with pytest.raises(ValueError,match='resources changed'):client.arm()
+    assert 'electron_enable' not in messages
 
 
 def test_adapter_transaction_and_terminal_no_rearm(adapter):

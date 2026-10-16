@@ -10,6 +10,7 @@ import threading
 import time
 
 from .protocol import MAX_REQUEST_BYTES, Protocol
+from .diagnostics import emit
 
 
 class ControlTransport:
@@ -145,6 +146,7 @@ def main(argv=None):
                 app.quit()
             return
         if transport.disconnected.is_set():
+            emit('backend_transport_closed')
             exiting = True
             shutdown.begin()
             return
@@ -168,10 +170,12 @@ def main(argv=None):
     timer.start(20)
     app.aboutToQuit.connect(bridge.close)
     transport.start()
+    emit('backend_ready')
     try:
         return app.exec()
     finally:
         timer.stop()
+        emit('backend_shutdown')
         bridge.close()
         transport.close()
         if bridge.report_cleanup_pending:

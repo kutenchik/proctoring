@@ -15,8 +15,9 @@ class PinVerifier:
     _ITERATIONS = 210_000
 
     def __init__(self, pin: str):
-        if not isinstance(pin, str) or not pin:
+        if not isinstance(pin, str):
             raise ValueError("Proctor PIN must be a nonempty string")
+        self._disabled = not pin
         self._salt = secrets.token_bytes(16)
         self._digest = self._derive(pin)
 
@@ -26,6 +27,6 @@ class PinVerifier:
         )
 
     def verify(self, text: str) -> bool:
-        if not isinstance(text, str):
+        if self._disabled or not isinstance(text, str):
             return False
         return hmac.compare_digest(self._digest, self._derive(text))

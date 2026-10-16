@@ -4,6 +4,16 @@ import { reviewPhrases } from './review-i18n';
 
 export type Language = 'en' | 'ru' | 'kk';
 const phrases = {
+  audioPending:['Audio pending','Аудио ожидается','Аудио күтілуде'],
+  audioUnavailable:['Audio unavailable. This does not mean no sound occurred.','Аудио недоступно. Это не означает отсутствия звука.','Аудио қолжетімсіз. Бұл дыбыс болмады дегенді білдірмейді.'],
+  audioEvidence:['Event audio','Аудио события','Оқиға аудиосы'],
+  audioGain:['Playback amplification (not speed)','Усиление громкости (не скорость)','Дыбысты күшейту (жылдамдық емес)'],
+  audioReset:['Reset to normal volume','Обычная громкость','Қалыпты дыбыс деңгейі'],
+  audioFailed:['Audio playback failed. Retry playback.','Не удалось воспроизвести аудио. Повторите попытку.','Аудионы ойнату мүмкін болмады. Қайталап көріңіз.'],
+  audioPartial:['Shortened clip: some audio was unavailable.','Сокращённый фрагмент: часть аудио недоступна.','Қысқартылған үзінді: аудионың бір бөлігі қолжетімсіз.'],
+  audioCaution:['Sound activity alone does not establish speech or misconduct.','Звуковая активность сама по себе не доказывает речь или нарушение.','Дыбыстық белсенділік сөйлеуді немесе ереже бұзуды дәлелдемейді.'],
+  configurations: ['Configurations','Конфигурации','Конфигурациялар'],
+  monitoringPolicy: ['Monitoring policy', 'Настройки мониторинга', 'Бақылау параметрлері'],
   snapshotPending: ['Snapshot pending', 'Снимок ожидается', 'Сурет күтілуде'],
   snapshotUnavailable: ['Snapshot unavailable', 'Снимок недоступен', 'Сурет қолжетімсіз'],
   snapshotDisabled: ['Snapshots disabled by exam policy', 'Снимки отключены правилами экзамена', 'Емтихан ережелері бойынша суреттер өшірілген'],

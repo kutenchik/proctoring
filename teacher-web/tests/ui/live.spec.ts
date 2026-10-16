@@ -31,6 +31,29 @@ async function stop(process:ChildProcessWithoutNullStreams){
   await Promise.race([exit,new Promise<void>(resolve=>setTimeout(resolve,4000))]);if(process.exitCode===null)process.kill();
 }
 
+test('active snapshot changes pending to decoded full image without reload and survives student exit',async({page})=>{
+  const item=await setup(page,'snapshots');
+  try {
+    const slot=page.locator('.event-snapshot-slot');
+    await expect(slot).toContainText('Snapshot pending');
+    const started=Date.now();item.process.stdin.write('snapshot\n');
+    const image=slot.locator('img');
+    await expect(image).toBeVisible();
+    await image.scrollIntoViewIfNeeded();
+    await expect.poll(()=>image.evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0)).toBe(true);
+    console.log(`Synthetic publish-to-browser-decode: ${Date.now()-started} ms`);
+    await slot.getByRole('button').click();
+    await expect(slot.getByRole('button')).toHaveAttribute('aria-expanded','true');
+    const full=page.locator('.snapshot-inspection img');
+    await expect.poll(()=>full.evaluate((img:HTMLImageElement)=>img.complete&&img.naturalWidth>0)).toBe(true);
+    await stop(item.process);
+    const response=await page.request.get((await image.getAttribute('src'))!);
+    expect(response.ok()).toBe(true);expect(response.headers()['content-type']).toContain('image/jpeg');
+    const review=await page.request.get(`/api/v1/attempts/${item.attempt_id}/review`);
+    expect((await review.json()).sync.receipt_complete).toBe(false);
+  } finally {await page.goto('/#/exams');await stop(item.process);}
+});
+
 test('real status, deduplicated event, command acknowledgement and independent pause semantics',async({page},info)=>{
   const item=await setup(page);
   try{

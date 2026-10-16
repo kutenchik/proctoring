@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { Locale } from '../../shared/contracts';
 const messages = {
+  backendEndedHelp: ['This backend connection cannot be restored. Close the application normally and contact the exam operator before reopening. Pending evidence is preserved.', 'Это соединение с Python восстановить нельзя. Закройте приложение обычным способом и свяжитесь с организатором экзамена перед повторным запуском. Неотправленные материалы сохраняются.', 'Python байланысын қалпына келтіру мүмкін емес. Қолданбаны қалыпты түрде жауып, қайта ашпас бұрын емтихан ұйымдастырушысына хабарласыңыз. Жіберілмеген материалдар сақталады.'],
   skipToMain: ['Skip to main content', 'Перейти к основному содержимому', 'Негізгі мазмұнға өту'],
   micNoise: ['Background noise is too high. Reduce noise and try again.', 'Фоновый шум слишком сильный. Уменьшите шум и повторите.', 'Фондық шу тым қатты. Шуды азайтып, қайталаңыз.'],
   micClipping: ['The input is clipping. Lower the microphone volume and retry.', 'Сигнал перегружен. Уменьшите громкость микрофона и повторите.', 'Сигнал шамадан тыс. Микрофон дыбысын азайтып, қайталаңыз.'],

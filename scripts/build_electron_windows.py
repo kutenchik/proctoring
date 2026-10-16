@@ -30,6 +30,7 @@ ELECTRON_FILES = (
 )
 ELECTRON_APP_FILES = (
     "main.cjs", "preload.cjs", "recovery-renderer.js", "recovery-renderer.html",
+    "screen_rtc_preload.cjs", "screen-transport.js", "screen-transport.html",
 )
 MODEL_HASHES = {
     "yolo11n.onnx": "7d8fd1717d9d5bbab6986cd134afb620649c7a394303d55b1e09fc00804cc5c1",
@@ -80,6 +81,7 @@ def require_environment() -> dict[str, str]:
             mismatches.append(f"{name}: expected {expected}, installed {actual}")
     if mismatches:
         raise ValueError("Use the isolated locked build environment:\n" + "\n".join(mismatches))
+    from websockets.sync.client import connect
     return pins
 
 
@@ -99,7 +101,7 @@ def public_config(text: str, *, protected: bool = False) -> str:
         ("vision", "yolo_model"): '"@bundle/models/yolo11n.onnx"',
         ("vision", "face_model"): '"@bundle/models/face_landmarker.task"',
         ("storage", "sessions_dir"): '"sessions"',
-        ("protection", "validation_report"): '"audits/electron-recovery.json"',
+        ("protection", "validation_report"): '"audits/startup-current.json"',
         ("protection", "enabled"): "true" if protected else "false",
     }
     section = ""; seen = set(); lines = []
@@ -224,7 +226,7 @@ def inspect_files(package: Path) -> list[dict]:
 def write_manifests(package: Path, versions: dict[str, str]) -> None:
     inventory = inspect_files(package)
     # Safety identity is built from immutable shipped bytes, excluding user data.
-    files = [row["path"] for row in inventory if not row["path"].endswith(".toml")]
+    files = [row["path"] for row in inventory ]
     manifest = {"schema": 1, "build_kind": "packaged", "files": files}
     (package / "resources/package-build.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (package / "PACKAGE-INVENTORY.json").write_text(json.dumps({
@@ -235,7 +237,9 @@ def write_manifests(package: Path, versions: dict[str, str]) -> None:
     }, indent=2) + "\n", encoding="utf-8")
 
 
-def build(output: Path, *, build_ui: bool = True) -> Path:
+def build(output: Path, *, build_ui: bool = True, student: bool = False, student_no_audit: bool = False, student_unprotected: bool = False) -> Path:
+    if student_no_audit and not student: raise ValueError('No-audit edition requires --student')
+    if student_unprotected and (not student or student_no_audit): raise ValueError('Unprotected edition requires --student and excludes --student-no-audit')
     if sys.platform != "win32" or struct.calcsize("P") != 8:
         raise ValueError("Build on 64-bit Windows using 64-bit Python")
     versions = require_environment()
@@ -269,11 +273,17 @@ def build(output: Path, *, build_ui: bool = True) -> Path:
     copy_tree(ROOT / "desktop/dist", application / "dist", suffixes=FRONTEND_SUFFIXES)
     (application / "package.json").write_text(json.dumps({"name": "local-proctoring-electron", "productName": "Local Proctoring", "version": "0.4.0", "main": "build-electron/main.cjs", "private": True}, indent=2) + "\n", encoding="utf-8")
     copy_tree(work / "dist/ProctoringBackend", output / "resources/backend")
-    source = (ROOT / "config/default.example.toml").read_text(encoding="utf-8-sig")
+    source = (ROOT / ("config/connected.example.toml" if student else "config/default.example.toml")).read_text(encoding="utf-8-sig")
     for protected, name in ((False, "default.example.toml"), (True, "protected.example.toml")):
-        (output / "resources" / name).write_text(public_config(source, protected=protected), encoding="utf-8")
+        config = public_config(source, protected=False if student_unprotected else protected or student)
+        if student:
+            config = '\n'.join(line for line in config.splitlines() if not line.lstrip().startswith('#')) + '\n'
+            config = config.replace('proctor_pin = "739261"', 'proctor_pin = ""')
+            if student_no_audit or student_unprotected:
+                config = config.replace('[protection]', '[protection]\nrequire_recovery_audit = false')
+        (output / "resources" / name).write_text(config, encoding="utf-8")
     collect_notices(output / "THIRD-PARTY-NOTICES", versions)
-    copy_file(ROOT / "packaging/ELECTRON-PACKAGE.md", output / "README.md")
+    copy_file(ROOT / ("packaging/STUDENT-UNPROTECTED.md" if student_unprotected else "packaging/STUDENT-NOAUDIT.md" if student_no_audit else "packaging/STUDENT-PORTABLE.md" if student else "packaging/ELECTRON-PACKAGE.md"), output / "README.md")
     write_manifests(output, versions)
     archive = archive_path(output)
     with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as target:
@@ -287,5 +297,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "dist/LocalProctoring-Electron-0.4.0-stage3-UNVALIDATED")
     parser.add_argument("--use-built-ui", action="store_true", help="Use explicitly prebuilt renderer/main; final artifact still requires its own audit")
+    parser.add_argument('--student', action='store_true')
+    parser.add_argument('--student-no-audit', action='store_true', help='Explicit Protected Mode edition without recovery-audit prerequisite')
+    parser.add_argument('--student-unprotected', action='store_true', help='Connected student edition without keyboard restrictions or recovery audit')
     args = parser.parse_args()
-    print(build(args.output, build_ui=not args.use_built_ui))
+    print(build(args.output, build_ui=not args.use_built_ui, student=args.student, student_no_audit=args.student_no_audit, student_unprotected=args.student_unprotected))

@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import type { BackendState } from '../../shared/contracts';
 
@@ -103,3 +104,74 @@ test('webcam preview stays in viewport during quiz and sidebar scroll without op
   expect(await page.locator('.camera-preview').count()).toBe(1);
   expect(await page.evaluate(()=>(window as any).__connected.calls.some((c:any)=>/camera|audio/.test(c.name)))).toBe(false);
 });
+
+
+for (const [width,height] of [[360,640],[600,620],[1100,720],[1920,1080]]) for (const locale of ['en','ru','kk']) {
+  test(`monitor layout stability ${width} ${locale}`, async ({page}, info) => {
+    await page.setViewportSize({width,height}); await mock(page,true); await page.goto('/');
+    await page.locator('#language').selectOption(locale);
+    await expect(page.locator('.monitor-panel')).toBeVisible();
+    await page.evaluate(() => { const s=(window as any).__connected.state; s.config.audio_exam_enabled=true;
+      const canvas=document.createElement('canvas');canvas.width=1280;canvas.height=720;
+      const ctx=canvas.getContext('2d')!;ctx.fillStyle='#47634b';ctx.fillRect(0,0,1280,720);ctx.fillStyle='#fff';ctx.font='42px sans-serif';ctx.fillText('Synthetic preview - no device',100,350);
+      s.camera.state='live';s.camera.selected_key='synthetic';
+      window.proctoring!.preview=async()=>({sequence:1,captured_at:1,width:1280,height:720,source_width:1280,source_height:720,mime:'image/jpeg',jpeg_base64:canvas.toDataURL('image/jpeg').split(',')[1],overlays:[]}); });
+    await expect(page.locator('.live-audio-meter')).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await page.locator('.question-panel').evaluate(e=>(e as HTMLElement).style.minHeight='1200px');
+    await page.evaluate(() => window.scrollTo(0,150));
+    const samples:any[]=[];
+    const measure=async(tag:string)=> {
+      const value=await page.evaluate(() => {
+        const selectors=['.camera-preview','.monitor-title','.module-status','.review-warning-slot','.recent-events','.question-panel','.timer'];
+        const bounds=Object.fromEntries(selectors.map(s=>{const e=document.querySelector(s)!;const r=e.getBoundingClientRect();return [s,{x:r.x,y:r.y,width:r.width,height:r.height}];}));
+        const panel=document.querySelector('.monitor-panel')!;
+        return {bounds,scroll:window.scrollY, panelScroll:panel.scrollTop,recentScroll:document.querySelector('.recent-events')!.scrollTop,scrollHeight:document.documentElement.scrollHeight,panelHeight:panel.scrollHeight,overflow:document.documentElement.scrollWidth>innerWidth};
+      }); samples.push({tag,...value});return value;
+    };
+    await page.locator('.camera-preview').evaluate(e=>(window as any).__stablePreview=e);
+    await page.waitForTimeout(500);
+    let baseline=await measure('normal');
+    for(let i=1;i<=12;i++) {
+      if(i===6) {
+        await page.locator('.monitor-panel').evaluate(e=>e.scrollTop=80);
+        await page.locator('.recent-events').evaluate(e=>e.scrollTop=30);
+        await page.evaluate(()=>window.scrollBy(0,30));
+        baseline=await measure('user-scroll');
+      }
+      await page.evaluate(i=>{
+        const w=(window as any).__connected.state.workflow;
+        const events=Array.from({length:Math.min(5,Math.ceil(i/2))},(_,n)=>({event_id:'event-'+n,event_type:n%2?'VOICE_DETECTED':'phone_raised',record_kind:'review_event',state:n===0&&i<9?'active':'closed',action:'updated',start_timestamp:`2026-10-15T12:00:0${n}Z`,timestamp:'2026-10-15T12:00:10Z',duration_seconds:i}));
+        if(i>=11)events.push({ ...events[0],event_id:'next-event',state:'active',start_timestamp:'2026-10-15T12:01:00Z'});
+        w.events={cursor:i,records:events};w.monitoring.gaze_direction=i%2?'DOWN':'UNKNOWN';w.snapshot_seq++;
+      },i);
+      await expect.poll(()=>page.evaluate(()=>(window as any).__connected.calls.filter((c:any)=>c.name==='state.get').length)).toBeGreaterThan(0);
+      await expect(page.locator('[data-event-id]')).not.toHaveCount(0);
+      await page.waitForTimeout(220);
+      const current=await measure('update-'+i);
+      expect.soft(current.overflow).toBe(false);
+      expect.soft(current.scroll).toBe(baseline.scroll);
+      expect.soft(current.panelScroll).toBe(baseline.panelScroll);
+      expect.soft(current.recentScroll).toBe(baseline.recentScroll);
+      expect.soft(current.scrollHeight).toBe(baseline.scrollHeight);
+      for(const selector of ['.camera-preview','.monitor-title','.review-warning-slot','.recent-events','.question-panel','.timer']) {
+        for(const axis of ['x','y','width','height'] as const)expect.soft(Math.abs(current.bounds[selector][axis]-baseline.bounds[selector][axis]),selector+' '+axis+' '+i).toBeLessThan(1);
+      }
+      expect.soft(await page.locator('.camera-preview').evaluate(e=>e===(window as any).__stablePreview)).toBe(true);
+      if(i===1)await page.locator('[data-active-event-id]').evaluate(e=>(window as any).__stableWarning=e);
+      if(i<9)expect.soft(await page.locator('[data-active-event-id]').evaluate(e=>e===(window as any).__stableWarning)).toBe(true);
+    }
+    await page.locator('.question-panel').evaluate(e=>(e as HTMLElement).style.minHeight='');
+    await page.locator('.monitor-panel').evaluate(e=>e.scrollTop=0);
+    await page.evaluate(()=>window.scrollTo(0,0));
+    await page.screenshot({path:info.outputPath('monitor.png'),fullPage:true});
+    for(const size of [{width:1920,height:1080},{width,height}]) {
+      await page.setViewportSize(size);await page.waitForTimeout(250);
+      expect(await page.locator('.camera-preview').evaluate(e=>e===(window as any).__stablePreview)).toBe(true);
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+    }
+    expect(await page.evaluate(()=>(window as any).__connected.calls.some((c:any)=>/camera.start|audio.start|exam.start/.test(c.name)))).toBe(false);
+    writeFileSync(info.outputPath('measurements.json'),JSON.stringify(samples,null,2));
+    await info.attach('measurements',{body:JSON.stringify(samples,null,2),contentType:'application/json'});
+  });
+}

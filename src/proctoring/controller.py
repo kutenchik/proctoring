@@ -36,6 +36,9 @@ class AppController:
             thresholds[EventType.EARPHONE_SUSPECTED] = .001
         self.events = EventEngine(thresholds, config.clearing_seconds, self.clock,
                                   max_observation_gap=self.observation_stale_seconds)
+        if config.event_rules:
+            from .exam_policy import EVENTS
+            self.events.disabled = {event for key,kinds in EVENTS.items() if not config.event_rules.get(key,True) for event in kinds}
         if monitor is not None:
             self.monitor = monitor
         elif mode == "camera":
@@ -72,6 +75,8 @@ class AppController:
         self.device_selection_ready = True
         self._camera_preview_allowed = False
         self._report_job = None
+        self.audio_evidence = None
+        self.audio_evidence_consent = False
         self.audio = None
         self.audio_events = None
         self._last_audio_sample = None
@@ -90,10 +95,75 @@ class AppController:
             self.audio_events = EventEngine({EventType.VOICE_DETECTED: config.audio.voice_duration_threshold},
                                            config.clearing_seconds, self.clock, max_observation_gap=.5,
                                            accumulate_sample_durations=True)
+        self.remote_observer = None
+        self.face_observer = None
+        self.advanced_authorized = False
+        self.configure_advanced()
         self.remote = None
         if config.remote.enabled:
             from .storage.remote_dispatcher import RemoteDispatcher
             self.remote = RemoteDispatcher(config.remote)
+
+    def configure_advanced(self, session=None):
+        if self.remote_observer is not None: self.remote_observer.close()
+        self.remote_observer = None
+        if self.face_observer is not None: self.face_observer.close()
+        self.face_observer = None
+        self.monitor.advanced_sink = None
+        if self.config.advanced.identity_enabled or self.config.advanced.liveness_enabled:
+            from .advanced.face_monitor import FaceMonitor
+            self.face_observer=FaceMonitor(self.config.advanced,self.clock,session)
+        self.advanced_authorized = False
+        if self.config.advanced.remote_enabled:
+            from .advanced.remote_monitor import RemoteMonitor
+            self.remote_observer = RemoteMonitor(self.config.advanced,self.clock)
+
+    def authorize_advanced(self, accepted):
+        accepted = bool(accepted) and not self.session.ended and not self._optional_closed
+        self.advanced_authorized = accepted
+        if self.face_observer is not None:
+            if accepted:
+                if self.face_observer.stop_event.is_set() and not self.session.started and (self.face_observer.thread is None or not self.face_observer.thread.is_alive()):
+                    from .advanced.face_monitor import FaceMonitor
+                    self.face_observer=FaceMonitor(self.config.advanced,self.clock,self.face_observer.session)
+                self.face_observer.start()
+                self.monitor.advanced_sink=self.face_observer.offer
+            else:
+                self.monitor.advanced_sink=None
+                if self.face_observer.thread is not None:
+                    self._write_events(self.face_observer.close())
+        
+        if self.remote_observer is not None:
+            if accepted: self.remote_observer.start()
+            elif self.remote_observer.thread is not None:
+                self._write_advanced_events(self.remote_observer.close())
+                from .advanced.remote_monitor import RemoteMonitor
+                self.remote_observer = RemoteMonitor(self.config.advanced,self.clock)
+
+    def _write_advanced_events(self, changes):
+        self._write_events([{**record,'event_id':self.remote_observer.prefix+record['event_id']} for record in changes])
+
+    @property
+    def advanced_ready(self):
+        return (not self.config.advanced.enabled or (self.advanced_authorized and
+            (self.remote_observer is None or self.remote_observer.status == 'complete') and
+            (self.face_observer is None or self.face_observer.ready)))
+
+    @property
+    def advanced_status(self):
+        values=[]
+        if self.remote_observer: values.append('remote: '+self.remote_observer.status)
+        if self.face_observer: values.append('face: '+self.face_observer.state+'; '+self.face_observer.identity+'; '+self.face_observer.liveness)
+        return '; '.join(values) or 'disabled'
+
+    def advanced_public(self):
+        result={}
+        if self.remote_observer: result['remote']=self.remote_observer.status
+        if self.face_observer:
+            result['worker']=self.face_observer.state
+            if self.config.advanced.identity_enabled: result['identity']=self.face_observer.identity
+            if self.config.advanced.liveness_enabled: result['liveness']=self.face_observer.liveness
+        return result
 
     @property
     def candidate_info(self) -> dict | None:
@@ -111,7 +181,7 @@ class AppController:
 
     @property
     def identity_ready(self) -> bool:
-        return (not self.config.identity.selfie_verification_enabled
+        return (not self.config.advanced.identity_enabled or bool(self.face_observer and self.face_observer.enrolled)) and (not self.config.identity.selfie_verification_enabled
                 or (self._baseline_saved is not None and self.store is not None
                     and not self._identity_save_error
                     and getattr(self.monitor, "identity_baseline", None) is self._baseline_saved
@@ -119,6 +189,7 @@ class AppController:
 
     @property
     def identity_status(self) -> str:
+        if self.config.advanced.identity_enabled and not self.identity_ready: return self.advanced_status
         if not self.config.identity.selfie_verification_enabled:
             return "Identity comparison disabled"
         if self.mode != "camera":
@@ -127,6 +198,10 @@ class AppController:
 
     @property
     def identity_can_capture(self) -> bool:
+        if self.config.advanced.identity_enabled:
+            face=self.face_observer
+            if not face or face.enrolled or face.state!='ready' or face.last_valid is None or self.clock.monotonic()-face.last_valid>2: return False
+            if not self.config.identity.selfie_verification_enabled: return not self.session.started
         return bool(self.mode == "camera" and self.config.identity.selfie_verification_enabled
                     and not self.session.started and getattr(self.monitor, "identity_can_capture", False))
 
@@ -145,7 +220,18 @@ class AppController:
         if not self.device_selection_ready:
             raise RuntimeError("Wait for device selection to finish")
         self._camera_preview_allowed = True
-        self.monitor.start()
+        try:
+            self.monitor.start()
+        except Exception as error:
+            self._camera_preview_allowed = False
+            from .desktop_bridge.diagnostics import emit
+            emit('camera_failed', error=error)
+            try:
+                self.monitor.stop()
+            except Exception as cleanup_error:
+                # Preserve the initialization failure, even if release fails.
+                emit('camera_cleanup_failed', error=cleanup_error)
+            raise
 
     def select_camera(self, device_id) -> bool:
         if self.session.started:
@@ -177,7 +263,8 @@ class AppController:
         if not self.identity_can_capture or (self.config.registration.enabled and self.session.candidate is None):
             raise RuntimeError("A fresh, single, frontal face is required for the baseline photo")
         self._identity_save_error = ""
-        self.monitor.request_identity_baseline()
+        if self.config.identity.selfie_verification_enabled: self.monitor.request_identity_baseline()
+        if self.config.advanced.identity_enabled: self.face_observer.request_enrollment()
 
     def preflight_status(self) -> dict:
         if self.system_checker is None:
@@ -278,7 +365,18 @@ class AppController:
         return self.store
 
     def poll_optional_workers(self) -> None:
+        self._drain_audio_evidence()
         """Only status/small records are consumed here; no CV/audio/PDF inference."""
+        if self.config.advanced.enabled and self.session.started and not self.session.ended:
+            state=self.advanced_public()
+            if state!=self._optional_status.get('advanced'):
+                self._append({'record_kind':'optional_monitor_status','component':'advanced',
+                    'timestamp':self.clock.wall_time(),'states':state})
+                self._optional_status['advanced']=state
+        if self.face_observer is not None and self.advanced_authorized:
+            self._write_events(self.face_observer.poll(self.session.started and not self.session.ended))
+        if self.remote_observer is not None and self.advanced_authorized:
+            self._write_advanced_events(self.remote_observer.poll(active=self.session.started and not self.session.ended))
         if (self.config.identity.selfie_verification_enabled and self.mode == "camera"
                 and not self.session.started):
             baseline = getattr(self.monitor, "identity_baseline", None)
@@ -326,18 +424,44 @@ class AppController:
                     changes = self.audio_events.observe(Observation(sample.timestamp, conditions, "audio_energy", duration))
                     if self._last_audio_sample is None or sample.timestamp > self._last_audio_sample:
                         self._last_audio_sample = sample.timestamp
-                self._write_audio_events(changes)
+                self._write_audio_events(changes, sample.timestamp)
             if (state["state"] == "unavailable" or (self._last_audio_sample is not None
                     and self.clock.monotonic() - self._last_audio_sample > .5)):
                 self._write_audio_events(self.audio_events.interrupt("audio_unavailable"))
 
-    def _write_audio_events(self, changes):
-        self._write_events([{**record, "event_id": "audio-" + record["event_id"]} for record in changes])
+    def _write_audio_events(self, changes, stamp=None):
+        records = [{**r, "event_id": "audio-" + r["event_id"]} for r in changes
+                   if not (r.get("action") == "activated" and
+                           "audio_status" in self._event_metadata.get("audio-"+r["event_id"], {}))]
+        self._write_events(records)
+        for record in records:
+            if record.get('action') == 'activated' and self.audio_evidence is not None:
+                event = record['event_id']
+                self._audio_result(event, None, None, 'pending')
+                reason = self.audio_evidence.trigger(event, self.clock.monotonic() if stamp is None else stamp)
+                if reason: self._audio_result(event, None, reason, 'unavailable')
+
+    def _audio_result(self, event, path, reason, status):
+        metadata = self._event_metadata.setdefault(event, {})
+        metadata.update(audio_status=status, audio_path=path, audio_reason=reason)
+        self._append({'record_kind':'review_event','timestamp':self.clock.wall_time(),
+                      'event_id':event,'action':'evidence_updated', **metadata})
+
+    def _drain_audio_evidence(self):
+        if self.audio_evidence is not None:
+            for event, path, reason in self.audio_evidence.drain():
+                self._audio_result(event, path, reason, 'ready' if path else 'unavailable')
 
     def close_optional_workers(self) -> None:
         if self._optional_closed:
             return
         self._optional_closed = True
+        if self.audio_evidence is not None:
+            self.audio_evidence.close()
+            self.audio_evidence.thread.join(.5)
+        if self.face_observer is not None: self._write_events(self.face_observer.close())
+        self.monitor.advanced_sink=None
+        if self.remote_observer is not None: self._write_advanced_events(self.remote_observer.close())
         if self.system_checker is not None:
             self.system_checker.close()
         if self.audio is not None:
@@ -423,8 +547,11 @@ class AppController:
         """A shared presentation view; security events bypass CV thresholds."""
         audio_events = ([{**event, "event_id": "audio-" + event["event_id"]} for event in self.audio_events.events]
                         if self.audio_events is not None else [])
+        advanced_events = ([{**e,'event_id':self.remote_observer.prefix+e['event_id']} for e in self.remote_observer.engine.events]
+                           if self.remote_observer else [])
+        if self.face_observer: advanced_events += self.face_observer.events
         records = [{**event, **self._event_metadata.get(event["event_id"], {})}
-                   for event in [*self.events.events, *audio_events, *self.security_events]]
+                   for event in [*self.events.events, *audio_events, *advanced_events, *self.security_events]]
         return sorted(records,
                       key=lambda event: event["start_timestamp"])
 
@@ -478,8 +605,11 @@ class AppController:
             self.monitor.start()
 
     def start(self) -> None:
+        if not self.advanced_ready: raise RuntimeError("Additional monitoring readiness is required")
         if not self.device_selection_ready or (self.audio is not None and getattr(self.audio, '_switching', False)):
             raise RuntimeError('Wait for device selection to finish before starting')
+        if self.config.audio_evidence.enabled and (not self.config.audio.enabled or not self.audio_evidence_consent):
+            raise RuntimeError("Audio evidence requires explicit consent v5")
         self.poll_optional_workers()
         self._require_registration()
         status = self.preflight_status()
@@ -517,6 +647,10 @@ class AppController:
                 self.system_checker.start_exam(lambda event: self.record_security_event(
                     event["event_type"], event["description"], event.get("details")))
             if self.audio is not None:
+                if self.config.audio_evidence.enabled:
+                    from .audio.evidence import AudioEvidence
+                    self.audio_evidence = AudioEvidence(self.config.audio_evidence, store.path, start_time=self.clock.monotonic())
+                    self.audio.evidence_sink = self.audio_evidence
                 self._audio_exam_started_at = self.clock.monotonic()
                 self._last_audio_sample = None
                 begin_exam = getattr(self.audio, "begin_exam", None)
@@ -568,15 +702,17 @@ class AppController:
 
     def _write_events(self, changes: list[dict]) -> None:
         for change in changes:
+            change=dict(change)
+            snapshot_frame=change.pop("_snapshot_frame",None)
             if change.get("action") == "activated":
                 severity = ("high" if change["event_type"] == EventType.IMPERSONATION_SUSPECTED.value else "review")
-                self._event_metadata[change["event_id"]] = {"severity": severity, "event_type": change["event_type"], "start_timestamp": change.get("start_timestamp")}
+                self._event_metadata[change["event_id"]] = {"severity": severity, "event_type": change["event_type"], "start_timestamp": change.get("start_timestamp"), **({"details":change["details"]} if "details" in change else {})}
             if "duration_seconds" in change:
                 self._event_metadata.setdefault(change["event_id"], {})["duration_seconds"] = change["duration_seconds"]
             change = {**change, **self._event_metadata.get(change["event_id"], {})}
             queued_snapshot = False
             if change.get("action") == "activated" and self.mode == "camera" and self.config.snapshots_enabled:
-                queued_snapshot = self._save_snapshot(change)
+                queued_snapshot = self._save_snapshot(change, snapshot_frame)
                 status = "pending" if queued_snapshot else "unavailable"
                 self._event_metadata[change["event_id"]]["snapshot_status"] = status
                 change["snapshot_status"] = status
@@ -598,19 +734,21 @@ class AppController:
                 else:
                     self._enqueue_remote("violation_alert", payload)
 
-    def _save_snapshot(self, change: dict) -> bool:
+    def _save_snapshot(self, change: dict, frame_override=None) -> bool:
         # Snapshot IO is handled by a bounded background queue, never by Qt.
         if self.store is None:
             return False
         result = self.monitor.delivered_result
-        if result is None or result.frame is None:
+        frame=frame_override if frame_override is not None else result.frame if result is not None else None
+        if frame is None:
             return False
         try:
-            self.store.enqueue_snapshot(change["event_id"], result.frame)
+            self.store.enqueue_snapshot(change["event_id"], frame)
             self._snapshots[change["event_id"]] = f"snapshots/{change['event_id']}.jpg"
             boxes = [{"x1": box.x1, "y1": box.y1, "x2": box.x2, "y2": box.y2, "label": label}
                      for label, collection in (("person", getattr(result, "persons", ())),
                                                 ("phone", getattr(result, "phones", ()))) for box in collection]
+            if frame_override is not None: boxes=[]
             self._event_metadata.setdefault(change["event_id"], {})["snapshot_boxes"] = boxes
             change["snapshot_boxes"] = boxes
             return True
@@ -711,6 +849,9 @@ class AppController:
     def end(self, reason: str = "completed") -> None:
         # Recover input first, even if persistence or downstream cleanup fails.
         self.protection.release(reason)
+        if self.face_observer is not None: self._write_events(self.face_observer.close())
+        self.monitor.advanced_sink=None
+        if self.remote_observer is not None: self._write_advanced_events(self.remote_observer.close())
         if self.system_checker is not None:
             self.system_checker.stop()
         # Once restrictions are released, the exam is terminal even if a media
@@ -723,6 +864,11 @@ class AppController:
             self.monitor.set_exam_active(False)
         self._drain_protection_events()
         self.monitor.stop()
+        if self.audio_evidence is not None:
+            self.audio_evidence.close()
+            self._drain_audio_evidence()
+            if not self.audio_evidence.finished: return
+            self._drain_audio_evidence()
         self._finalize()
 
     def emergency_end(self, reason: str = "emergency_shortcut") -> None:
@@ -740,6 +886,9 @@ class AppController:
         if self.summary is not None or not self.session.started:
             return
         self.protection.release(self.session.end_reason or "session_ended")
+        if self.face_observer is not None: self._write_events(self.face_observer.close())
+        self.monitor.advanced_sink=None
+        if self.remote_observer is not None: self._write_advanced_events(self.remote_observer.close())
         terminal_hook = getattr(self, 'connected_terminal_hook', None)
         if terminal_hook is not None:
             terminal_hook()

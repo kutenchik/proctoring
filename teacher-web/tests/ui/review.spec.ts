@@ -76,7 +76,7 @@ test('group review, individual exception, deliberate conclusion, manual history 
   await page.getByRole('button',{name:'Refresh',exact:true}).click();
   const download=page.waitForEvent('download');await page.getByRole('button',{name:'Reviewed PDF 1',exact:true}).click();
   const downloaded=await download;expect(downloaded.suggestedFilename()).toBe('reviewed-report-v1.pdf');await downloaded.saveAs(info.outputPath('reviewed-v1.pdf'));
-  const original=page.waitForEvent('download');await page.getByRole('button',{name:'Original local PDF',exact:true}).click();expect((await original).suggestedFilename()).toBe('original-report.pdf');
+  const original=page.waitForEvent('download');await page.getByRole('button',{name:'Original local PDF',exact:true}).click();const originalFile=await original;expect(originalFile.suggestedFilename()).toBe('original-report.pdf');await originalFile.saveAs(info.outputPath('original-report.pdf'));
   await page.getByRole('button',{name:'Add observation'}).click();
   await page.getByLabel('Category',{exact:true}).fill('Operator context');await page.getByLabel('Description',{exact:true}).fill('Manually reviewed after the exam.');
   await page.locator('.inline-review-form').getByRole('button',{name:'Confirm action',exact:true}).click();
@@ -95,7 +95,7 @@ test('group review, individual exception, deliberate conclusion, manual history 
   await page.getByLabel('Language',{exact:true}).selectOption('ru');await expect(page.getByRole('heading',{name:'Полный приём подтверждён'})).toBeVisible();
   await page.setViewportSize({width:375,height:900});await page.getByLabel('Язык',{exact:true}).selectOption('kk');await expect(page.getByRole('heading',{name:'Толық қабылдау расталды'})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:info.outputPath('review-kk-mobile.png'),fullPage:true});
   await page.getByLabel('Тіл',{exact:true}).selectOption('en');await page.goto(`/#/exam/${item.exam_id}`);
-  const xlsx=page.waitForEvent('download');await page.getByRole('button',{name:'Export exam XLSX'}).click();expect((await xlsx).suggestedFilename()).toBe('exam-attempts.xlsx');
+  const xlsx=page.waitForEvent('download');await page.getByRole('button',{name:'Export exam XLSX'}).click();const xlsxFile=await xlsx;expect(xlsxFile.suggestedFilename()).toBe('exam-attempts.xlsx');await xlsxFile.saveAs(info.outputPath('exam-attempts.xlsx'));
 });
 
 test('interruption recovery is a narrow reasoned grant, with during-exam manual notes and no finalization',async({page})=>{

@@ -56,7 +56,10 @@ class NamedCamera(LatestFrameCamera):
             self._error = self._error_at = None
 
     def _run_qt(self):
+        from ..desktop_bridge.diagnostics import emit
         camera = session = sink = None
+        timer = None
+        emit('camera_opening')
         try:
             from PySide6.QtMultimedia import QCamera, QMediaCaptureSession, QMediaDevices, QVideoSink
             device = next((d for d in QMediaDevices.videoInputs()
@@ -82,6 +85,7 @@ class NamedCamera(LatestFrameCamera):
                     self._fail('Camera frame conversion failed; retry camera')
                     loop.quit()
             def failed(*_):
+                emit('camera_failed')
                 self._fail('Camera unavailable: check permissions, connection or another app using it')
                 loop.quit()
             sink.videoFrameChanged.connect(received, Qt.ConnectionType.DirectConnection)
@@ -100,15 +104,20 @@ class NamedCamera(LatestFrameCamera):
             timer.start(100)
             if not self.stopped:
                 camera.start()
+                emit('camera_started')
                 loop.exec()
             timer.stop()
         except Exception as error:
-            self._fail(str(error))
+            emit('camera_failed', error=error)
+            self._fail('Camera initialization failed; check permissions and connection, then retry camera')
         finally:
-            if camera is not None:
-                camera.stop()
-            if session is not None:
-                session.setVideoSink(None)
-                session.setCamera(None)
+            cleanup = ([timer.stop] if timer is not None else [])
+            cleanup += ([camera.stop] if camera is not None else [])
+            cleanup += ([lambda: session.setVideoSink(None), lambda: session.setCamera(None)] if session is not None else [])
+            for release in cleanup:
+                try:
+                    release()
+                except Exception as error:
+                    emit('camera_cleanup_failed', error=error)
             # Native resources are destroyed on their owning capture thread.
             del sink, session, camera

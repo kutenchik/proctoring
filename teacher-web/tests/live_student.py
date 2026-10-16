@@ -28,7 +28,7 @@ service = Service(Settings(database=database, public_url=runtime["public_url"], 
 with service.database.connect() as c:
     owner = c.execute("SELECT id FROM teachers WHERE email=?", (sys.argv[1],)).fetchone()[0]
 library = service.save_library(owner, {"title":"Synthetic live questions", "questions":[{"id":"q1","type":"single_choice","prompt":"Synthetic question", "options":[{"id":"a","text":"A"},{"id":"b","text":"B"}],"correct_option_ids":["a"]}]})
-exam = service.create_exam(owner, {"title":"Synthetic live exam", "exam_type":"native", "library_id":library["id"], "admission_start":iso(time.time()-60), "admission_close":iso(time.time()+3600), "duration_seconds":600, "timezone":"UTC", "shuffle_questions":False, "shuffle_options":False, "audio_monitoring":False, "save_snapshots":False, "protection_mode":"unprotected"})
+exam = service.create_exam(owner, {"title":"Synthetic live exam", "exam_type":"native", "library_id":library["id"], "admission_start":iso(time.time()-60), "admission_close":iso(time.time()+3600), "duration_seconds":600, "timezone":"UTC", "shuffle_questions":False, "shuffle_options":False, "audio_monitoring":False, "save_snapshots":len(sys.argv)>2 and sys.argv[2]=="snapshots", "protection_mode":"unprotected"})
 credential, secret = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
 admission = service.admit({"exam_code":exam["code"],"full_name":"Synthetic Live Student", "group":"LIVE-TEST","student_id":uuid4().hex[:10],"admission_id":uuid4().hex,"device_id":uuid4().hex,"credential":credential,"device_secret":secret})
 session_id="session-"+uuid4().hex
@@ -98,6 +98,27 @@ async def main():
                     if m["payload"].get("text")!="NO_ACK":await ws.send(json.dumps({"type":"command_ack","command_id":m["command_id"],"phase":"applied","result":{"state":state["state"],"pause_reasons":state["pause_reasons"]}}))
                 elif m["type"]=="view.start":
                     task=asyncio.create_task(stream(m));streaming.add(task);task.add_done_callback(streaming.discard)
+        if len(sys.argv)>2 and sys.argv[2]=="snapshots":
+            # Production client dependencies live in the separate student venv.
+            sys.path.append(str(ROOT/'.venv/Lib/site-packages'))
+            from proctoring.connected.durable import DurableJournal
+            from proctoring.connected.client import ConnectedClient
+            from proctoring.connected.settings import ConnectedConfig
+            from proctoring.connected.sync import SyncWorker
+            root=database.parent/session_id;root.mkdir()
+            (root/'session.json').write_text(json.dumps({'session_id':session_id,'connected_attempt':{'attempt_id':admission['attempt_id']}}))
+            event={'session_id':session_id,'event_id':'event-live-1','event_type':'phone_visible','action':'activated',
+                'start_timestamp':iso(time.time()),'snapshot_path':'snapshots/event-live-1.jpg','snapshot_status':'pending'}
+            (root/'events.jsonl').write_text(json.dumps(event)+'\n')
+            journal=DurableJournal(root/'outbox.db')
+            key='attempt:'+admission['attempt_id']
+            journal.put(key,{'attempt_id':admission['attempt_id'],'session_id':session_id,'server':runtime['public_url'],
+                'credential':credential,'device_secret':secret,'checkpoint':{'elapsed_seconds':10},'phase':'locally_started',
+                'screen_consent':{'version':3,'accepted':True},'admission':admission,'identity_required':False,'report_filename':'report.pdf'})
+            client=ConnectedClient(ConnectedConfig(allow_loopback_http=True),remember_path=root/'remember.json')
+            client.device={'device_secret':secret}
+            worker=SyncWorker(journal,root.parent,client.transport)
+            await asyncio.to_thread(worker.once,journal.get(key))
         async def instructions():
             nonlocal frames_on,control_on
             while True:
@@ -111,6 +132,10 @@ async def main():
                     if data.get('type')=='quiz_progress':
                         state['answered']=int(data['answered'])
                     continue
+                if command=="snapshot":
+                    target=root/'snapshots/event-live-1.jpg';target.parent.mkdir(exist_ok=True)
+                    partial=target.with_suffix('.partial');partial.write_bytes(raw.getvalue());partial.replace(target)
+                    await asyncio.to_thread(worker.once,journal.get(key))
                 if command=="no_frames":frames_on=False
                 if command=="frames":frames_on=True
                 if command=="no_status":control_on=False

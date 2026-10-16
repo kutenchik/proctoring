@@ -82,7 +82,11 @@ def runtime_resources(binding, package_root=None):
     else:
         root=Path(__file__).resolve().parents[3]
         paths=list((root/'src/proctoring/security').glob('*.py'))+list((root/'src/proctoring/desktop_bridge').glob('*.py'))
-        paths += [root/'src/proctoring'/name for name in ('controller.py','session.py','config.py')]
+        paths += [root/'src/proctoring'/name for name in ('controller.py','session.py','config.py','exam_policy.py','events/engine.py','connected/client.py','connected/live_workflow.py')]
+        paths += list((root/'src/proctoring/advanced').glob('*.py'))
+        paths += list((root/'src/proctoring/audio').glob('*.py'))
+        paths += [root/'src/proctoring/vision/monitor.py',root/'src/proctoring/domain.py']
+        paths += [root/'config/default.example.toml']
         paths += [p for folder in ('electron','shared','src','scripts') for p in (root/'desktop'/folder).rglob('*') if p.is_file()]
         prefix=b'proctoring-electron-source-v1\0'
         app_root=root/'desktop'
@@ -109,6 +113,8 @@ def require_electron_validation(path, identity, max_age_hours=24.):
             raise ValueError('Electron recovery audit required; legacy reports are incompatible')
         if report.get('blocking_enabled') is not False or report.get('passed') is not True:
             raise ValueError('Electron recovery audit did not pass')
+        if report.get('status', 'completed') != 'completed':
+            raise ValueError('Electron recovery audit is incomplete or failed')
         if report.get('identity') != identity: raise ValueError('Machine/runtime/build changed since audit')
         generated=datetime.fromisoformat(report['generated_at'])
         if generated.tzinfo is None: raise ValueError('Audit timestamp requires a timezone')

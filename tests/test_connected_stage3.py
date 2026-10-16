@@ -39,6 +39,24 @@ def make_live(tmp_path,started=True):
     return b,t,j,w,count
 
 
+def test_fresh_connected_state_exposes_admission_before_consent(tmp_path):
+    from test_connected_workflow import connected_workflow
+    b = connected_workflow(tmp_path)
+    b.live_teacher = LiveWorkflow(b, worker=Worker(b.clock.monotonic), display_count_provider=lambda:1)
+    try:
+        assert b.admission_client.admission is None
+        state = b.state()
+        assert state['admission']['policy_applied'] is False
+        assert state['live_teacher']['consent']['accepted'] is False
+        assert not b.monitor.started and not b.controller.session.started
+        b.admission_client.admission = {'exam': {'monitoring_policy': {
+            'values': {'audio_evidence.enabled': True}}}}
+        assert b.live_teacher.consent_version == 5
+        assert b.live_teacher.consent_accepted is False
+    finally:
+        b.close()
+
+
 def command(b,w,kind,payload,**changes):
     row=b.connected_sync.row()
     value={'type':'command','command_id':uuid4().hex,'teacher_id':'teacher-a','exam_id':b.admission_client.admission['exam']['id'],
@@ -65,7 +83,16 @@ def test_teacher_pause_resume_preserve_monitoring_proctor_and_offline_state(tmp_
     b,t,j,w,count=make_live(tmp_path)
     try:
         command(b,w,'pause',{'reason':'Clarification'})
-        b.dispatch('proctor.pause',{'pin':'2468'})
+        original_transport=b.admission_client.transport
+        def teacher_pin(method,origin,endpoint,body,credential):
+            if endpoint=='/student/protection-pin': return {'configured':True,'revision':1}
+            if endpoint=='/student/protection-pin/verify':
+                return {'authorized':True,'revision':body['revision'],'action':body['action'],'nonce':body['nonce']}
+            return original_transport(method,origin,endpoint,body,credential)
+        b.admission_client.transport=teacher_pin
+        b.dispatch('proctor.pause',{'pin':'836204'})
+        b.admission_client._thread.join(2);b.tick()
+        assert 'proctor' in b.controller.session.pause_reasons
         b.controller.session.monitoring_failed('camera unavailable')
         command(b,w,'resume',{'reason':'Continue when local checks allow'})
         assert b.controller.session.pause_reasons=={'proctor','monitoring'}

@@ -53,3 +53,11 @@ test('network and validation failures are explicit errors, not successful empty 
 test('API refuses origin escape paths', async () => {
   await assert.rejects(new TeacherApi().request('//example.invalid'), /invalid_api_path/);
 });
+
+
+test('configuration routes retain saved-profile and duplicate identities',()=>{
+ assert.deepEqual(routeFromHash('#/configurations'),{page:'configurations'});
+ assert.deepEqual(routeFromHash('#/configuration/abc'),{page:'configuration',id:'abc',source:undefined});
+ assert.deepEqual(routeFromHash('#/configuration/new?from=default'),{page:'configuration',id:'new',source:'default'});
+ for(const language of ['en','ru','kk'] as const) assert.notEqual(translate(language,'configurations'),'configurations');
+});

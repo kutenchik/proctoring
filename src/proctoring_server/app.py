@@ -108,6 +108,25 @@ def create_app(settings: Settings | None = None, *, clock=None, public_errors=Fa
             raise Problem("invalid_credential", "An attempt bearer credential is required", 401)
         return value[7:]
 
+    from .protection_pin import ProtectionPins
+    pins = ProtectionPins(service)
+
+    @app.get(PREFIX + '/settings/protection-pin')
+    def pin_status(request: Request):
+        return pins.status(owner(request))
+
+    @app.post(PREFIX + '/settings/protection-pin')
+    def pin_change(request: Request, data: dict):
+        return pins.change(owner(request, True), data)
+
+    @app.get(PREFIX + '/student/protection-pin')
+    def pin_revision(request: Request):
+        return pins.revision(credential(request))
+
+    @app.post(PREFIX + '/student/protection-pin/verify')
+    def pin_verify(request: Request, data: dict):
+        return pins.verify(credential(request), data)
+
     @app.get(PREFIX + "/health")
     def health():
         return {"service": "local-proctoring-teacher", "api_version": 1, "server_time": iso(service.clock())}
@@ -208,6 +227,8 @@ def create_app(settings: Settings | None = None, *, clock=None, public_errors=Fa
 
     from .sync_routes import install_sync_routes
     from .review_routes import install_review_routes
+    from .configuration import install_configuration_routes
+    install_configuration_routes(app, service, owner)
     from .live_routes import install_live_routes
     install_sync_routes(app, service, sync, owner, credential)
     install_review_routes(app, service, sync, owner)

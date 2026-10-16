@@ -60,6 +60,23 @@ def protected(tmp_path):
     bridge.close()
 
 
+def test_camera_initialization_failure_never_arms_protection(protected):
+    bridge, adapter = protected
+    bridge.dispatch('consent.set', {'accepted': True})
+    bridge.dispatch('camera.select', {'key': 'camera-a'})
+    def fail():
+        bridge.monitor._camera.alive = True
+        raise OSError('injected camera initialization failure')
+    bridge.monitor._camera.start = fail
+    with pytest.raises(BridgeError, match='Camera initialization failed'):
+        bridge.dispatch('camera.start', {})
+    with pytest.raises(BridgeError):
+        bridge.dispatch('exam.start', {})
+    assert adapter.arm_count == 0 and not adapter.armed
+    assert not bridge.monitor._camera.alive
+    assert not bridge.controller.session.started
+
+
 def test_missing_desktop_ownership_blocks_devices_before_capture(protected):
     bridge, adapter = protected
     adapter.media_allowed = False

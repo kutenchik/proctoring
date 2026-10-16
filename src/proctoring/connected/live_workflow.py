@@ -4,6 +4,7 @@ import json
 import math
 from uuid import uuid4
 
+from ..advanced.settings import consent_version
 from .live import LiveWorker
 from .sync import canonical
 from .sync import digest
@@ -38,6 +39,13 @@ class LiveWorkflow:
         if QGuiApplication.instance() is None:return None
         return len(QGuiApplication.screens())
 
+    @property
+    def consent_version(self):
+        # State is published before admission so the exam-code screen can load.
+        # Once admitted, always derive consent from the server's exam policy.
+        exam = self.client.admission['exam'] if self.client.admission else {}
+        return consent_version(exam)
+
     def row(self):
         return self.b.connected_sync.row()
 
@@ -46,7 +54,7 @@ class LiveWorkflow:
         row=self.row()
         if not row or row.get('phase') in ('terminal_pending','ended_locally') or row.get('cleanup'):return
         self.started=True
-        self.consent_accepted=bool((row.get('screen_consent') or {}).get('accepted') is True and (row.get('screen_consent') or {}).get('version') == 3)
+        self.consent_accepted=bool((row.get('screen_consent') or {}).get('accepted') is True and (row.get('screen_consent') or {}).get('version') == self.consent_version)
         self.display.update(row.get('display_incident') or {})
         self.display_baseline_id=row.get('display_calibration_id')
         self._restore_display_incident(row)
@@ -79,7 +87,7 @@ class LiveWorkflow:
     def consent(self, accepted):
         if self.c.session.started:raise BridgeError('wrong_state','Screen consent is fixed after start')
         self.consent_accepted=accepted;self.consent_acknowledged=False
-        self.client.persist(screen_consent={'accepted':accepted,'version':3,'timestamp':self.b.clock.wall_time()})
+        self.client.persist(screen_consent={'accepted':accepted,'version':self.consent_version,'timestamp':self.b.clock.wall_time()})
         self.worker.consent(accepted)
 
     def prepare_start(self):
@@ -162,9 +170,9 @@ class LiveWorkflow:
             if generation!=connection or connection is None:continue
             kind=message.get('type')
             if kind=='consent':
-                self.consent_acknowledged=bool(message.get('accepted') is True and message.get('version')==3 and
+                self.consent_acknowledged=bool(message.get('accepted') is True and message.get('version')==self.consent_version and
                     message.get('session_id')==self.b._session_id() and self.consent_accepted)
-                if self.consent_acknowledged:self.client.persist(screen_consent={'accepted':True,'version':3,'timestamp':message.get('recorded_at')})
+                if self.consent_acknowledged:self.client.persist(screen_consent={'accepted':True,'version':self.consent_version,'timestamp':message.get('recorded_at')})
             elif kind=='command':
                 try:self.apply_command(message,generation,deadline)
                 except Exception:
@@ -247,7 +255,11 @@ class LiveWorkflow:
                 applied=True
             elif reason_valid:
                 audit['reason']=reason
-                if kind=='pause' and set(payload)=={'reason'}:applied=s.teacher_pause(**audit)
+                if kind=='monitoring_policy' and self.consent_accepted and self.consent_acknowledged:
+                    from ..exam_policy import apply_live
+                    try:applied=apply_live(self.b,payload,command)
+                    except ValueError:applied=False
+                elif kind=='pause' and set(payload)=={'reason'}:applied=s.teacher_pause(**audit)
                 elif kind=='resume' and set(payload)=={'reason'}:applied=s.teacher_resume(**audit)
                 elif kind=='end' and set(payload)=={'reason','confirm'} and payload['confirm'] is True:
                     # Existing end releases protection before media/report work.
@@ -271,6 +283,8 @@ class LiveWorkflow:
         elif s.ended:code='terminal_attempt'
         result={key:value for key,value in self.status().items() if key in ('state','pause_reasons','elapsed_seconds','remaining_seconds','duration_seconds')}
         result['code']=code
+        if kind=='monitoring_policy' and applied:
+            result.update(policy_revision=self.b.policy_revision,policy_hash=digest(self.b.effective_policy))
         if kind=='add_time' and applied:
             result.update(old_duration_seconds=old_duration,new_duration_seconds=s.duration_seconds,
                           delta_seconds=s.duration_seconds-old_duration)
@@ -281,7 +295,8 @@ class LiveWorkflow:
         if self.c.store:self.c.store.flush_durable()
         ledger[command['command_id']]=outcome
         self.client.persist(live_commands=ledger,teacher_messages=list(self.messages),display_incident=dict(self.display),
-                            checkpoint=self.b.connected_sync.make_checkpoint())
+                            checkpoint=self.b.connected_sync.make_checkpoint(),
+                            effective_monitoring_policy=getattr(self.b,'effective_policy',None),policy_revision=getattr(self.b,'policy_revision',0))
         self._ack(command,outcome['phase'],result,outcome['reason'])
 
     def _start_viewer(self,message):
@@ -340,7 +355,8 @@ class LiveWorkflow:
 
     def public(self):
         return {'connection':self.worker.connection,'error':self.error or self.worker.error,
-                'consent':{'accepted':self.consent_accepted,'version':3,'acknowledged':self.consent_acknowledged},
+                'advanced':self.c.advanced_public(),
+                'consent':{'accepted':self.consent_accepted,'version':self.consent_version,'acknowledged':self.consent_acknowledged,'features':[key for key in ('remote','liveness','identity') if getattr(self.b.config.advanced,key+'_enabled')]+(['audioEvidence'] if self.b.config.audio_evidence.enabled else [])},
                 'viewing':dict(self.viewer),'messages':list(self.messages),'display':dict(self.display),
                 'monitoring_outage':self._outage(),'screen_diagnostic':self.screen_diagnostic}
 

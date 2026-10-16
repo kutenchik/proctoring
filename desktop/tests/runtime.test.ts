@@ -13,8 +13,9 @@ test('packaged runtime uses only bundled backend and writable local config', () 
   assert.deepEqual(r.supervisorPrefix, ['--desktop-supervisor']);
   assert.deepEqual(r.auditPrefix, ['--electron-recovery-audit']);
   assert.equal(r.dev, false);
-  assert.equal(r.config, path.join('C:/local', 'LocalProctoring', 'Electron', 'config.toml'));
-  assert.equal(r.auditOutput, path.join('C:/local', 'LocalProctoring', 'Electron', 'audits', 'electron-recovery.json'));
+  assert.equal(path.dirname(r.config), path.join('C:/local', 'LocalProctoring', 'Student'));
+  assert.match(path.basename(r.config), /^config-[a-f0-9]{24}\.toml$/);
+  assert.equal(r.auditOutput, path.join('C:/local', 'LocalProctoring', 'Student', 'audits', 'startup-current.json'));
 });
 test('packaged explicit config resolves against caller cwd while source preserves repo behavior', () => {
   assert.equal(resolveRuntime({ ...options, argv: ['--config', 'custom.toml'] }).config, path.resolve(options.cwd, 'custom.toml'));
@@ -23,7 +24,7 @@ test('packaged explicit config resolves against caller cwd while source preserve
   assert.equal(source.dev, true);
   assert.throws(() => resolveRuntime({ ...options, argv: ['--config'] }), /requires a path/);
 });
-test('first-run config copy is exclusive and preserves subsequent operator edits', () => {
+test('first-run defaults are copied once and unexpected edits block default launch', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'proctoring-runtime-'));
   try {
     mkdirSync(path.join(dir, 'resources'));
@@ -31,7 +32,7 @@ test('first-run config copy is exclusive and preserves subsequent operator edits
     const r = resolveRuntime({ ...options, resources: path.join(dir, 'resources'), env: { LOCALAPPDATA: dir } });
     ensureRuntimeConfig(r);
     assert.match(readFileSync(r.config, 'utf8'), /enabled=false/);
-    writeFileSync(r.config, '# operator settings'); ensureRuntimeConfig(r);
+    writeFileSync(r.config, '# operator settings'); assert.throws(()=>ensureRuntimeConfig(r), /configuration changed/);
     assert.equal(readFileSync(r.config, 'utf8'), '# operator settings');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

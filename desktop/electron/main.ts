@@ -1,5 +1,6 @@
 import { app, dialog, BrowserWindow, globalShortcut, ipcMain, screen, session, Tray, Menu, nativeImage, type IpcMainInvokeEvent } from 'electron';
 import path from 'node:path';
+import { mkdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { PythonBridge } from './bridge';
@@ -30,6 +31,7 @@ let geometry: GeometryOwner | undefined;
 let lastGeometry = '';
 let lastGeometryIdentity = '';
 let stopping = false;
+let startupInProgress = app.isPackaged;
 let connecting = false;
 let configuringExternal = false;
 let hostBound = false;
@@ -144,7 +146,8 @@ async function connect(): Promise<void> {
   try {
     if (!bridge) {
       ensureRuntimeConfig(runtime);
-      bridge = new PythonBridge(runtime.python, runtime.config, runtime.backendCwd, launchId, runtime.supervisorPrefix, app.isPackaged ? path.dirname(process.execPath) : undefined);
+      bridge = new PythonBridge(runtime.python, runtime.config, runtime.backendCwd, launchId, runtime.supervisorPrefix, app.isPackaged ? path.dirname(process.execPath) : undefined,
+        path.join(app.getPath('userData'), 'diagnostics', 'backend-lifecycle.json'));
       bridge.onState = updateState;
       bridge.onDisconnected = () => { liveScreen?.stopLease('backend_disconnected'); external?.intent({ action: 'hide' }); presentation.lose(); };
       await bridge.start();
@@ -177,17 +180,20 @@ async function connect(): Promise<void> {
 async function stop(emergency = false): Promise<void> {
   if (stopping) return;
   stopping = true;
-  liveScreen?.close(); liveScreen = undefined;
-  if (presentationTimer) clearInterval(presentationTimer);
-  presentationTimer = undefined;
-  globalShortcut.unregisterAll();
-  tray?.destroy(); tray = undefined;
+  bridge?.diagnostics.record('main_shutdown_started');
   await finishShutdown({
+    onStepFailure: () => bridge?.diagnostics.fail('shutdown_cleanup_failed'),
+    preparation: [
+      () => { if (presentationTimer) clearInterval(presentationTimer); presentationTimer = undefined; },
+      () => { const live = liveScreen; liveScreen = undefined; live?.close(); },
+      () => globalShortcut.unregisterAll(),
+      () => { const previous = tray; tray = undefined; previous?.destroy(); },
+    ],
     closePresentation: () => external?.close(),
     endSession: async () => { if (emergency && bridge && !bridge.terminated) await bridge.host('emergency.end'); },
     closeBackend: async () => { await bridge?.close(); },
-    quit: () => app.quit(),
-    reportErrors: errors => { console.error('Application shutdown encountered teardown errors', errors); process.exitCode = 1; },
+    quit: () => { bridge?.diagnostics.record('main_quit_requested'); app.quit(); },
+    reportErrors: () => { bridge?.diagnostics.fail('shutdown_cleanup_failed'); console.error('Application shutdown encountered teardown errors'); process.exitCode = 1; },
   });
 }
 
@@ -196,13 +202,25 @@ if (process.argv.includes('--recovery-fixture')) {
 } else if (process.argv.includes('--protected-fixture')) {
   void import('./protected_fixture').then(m => m.runProtectedFixture()).catch(error => { console.error(String(error)); app.quit(); });
 } else if (process.argv.includes('--validate-electron-protection')) {
-  void import('./recovery_audit').then(m => m.runRecoveryAudit()).catch(error => { console.error(String(error)); app.quit(); });
+  // Separate from the student instance: an audit still owns this lock if its
+  // startup parent crashes. A retry cannot overlap the orphan's safe cleanup.
+  if (app.isPackaged) {
+    const ownerProfile = path.join(runtime.writable, 'recovery-owner');
+    mkdirSync(ownerProfile, { recursive: true }); app.setPath('userData', ownerProfile);
+  }
+  if (app.isPackaged && !app.requestSingleInstanceLock()) { process.exitCode = 1; app.quit(); }
+  else void import('./recovery_audit').then(m => m.runRecoveryAudit()).catch(error => { process.exitCode = 1; console.error(String(error)); app.quit(); });
 } else if (process.argv.includes('--validate-electron-short-protection')) {
   void import('./protected_audit').then(m => m.runProtectedAudit()).catch(error => { console.error(String(error)); app.quit(); });
 } else if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (!stopping && window && !window.isDestroyed()) { window.restore(); window.focus(); } });
   app.whenReady().then(async () => {
+    if (app.isPackaged) {
+      const accepted = await (await import('./packaged_startup')).packagedStartup(runtime);
+      startupInProgress = false;
+      if (!accepted) { process.exitCode = 1; await stop(); return; }
+    }
     const isolated = session.fromPartition('local-proctoring-stage2');
     isolated.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     isolated.setPermissionCheckHandler(() => false);
@@ -354,7 +372,7 @@ else {
     }, 250); presentationTimer.unref();
     await window.loadURL(rendererUrl);
     if (!stopping && window && !window.isDestroyed()) { window.show(); await connect(); }
-  }).catch(() => { void stop(); });
-  app.on('before-quit', event => { if (!stopping) { event.preventDefault(); void stop(); } });
-  app.on('window-all-closed', () => { void stop(); });
+  }).catch(() => { startupInProgress = false; process.exitCode = 1; void stop(); });
+  app.on('before-quit', event => { if (startupInProgress) { event.preventDefault(); return; } if (!stopping) { event.preventDefault(); void stop(); } });
+  app.on('window-all-closed', () => { if (!startupInProgress) void stop(); });
 }

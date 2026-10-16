@@ -19,6 +19,7 @@ class ElectronProtection(WindowsProtection):
         self._identity=None
         self._resources=None
         self._audit_valid=False
+        self._resources_valid=False
         self._audit_message='Electron recovery audit required'
         self._phase='disabled' if not config.enabled else 'awaiting_audit'
         self._reason='disabled' if not config.enabled else 'host_binding_required'
@@ -92,6 +93,7 @@ class ElectronProtection(WindowsProtection):
 
     def _validate_audit(self,*,initial=False):
         self._audit_valid=False
+        self._resources_valid=False
         try:
             if self.identity_factory is runtime_identity:
                 if initial:
@@ -105,11 +107,19 @@ class ElectronProtection(WindowsProtection):
                 # tests. Production always retains verified Windows resources.
                 self._identity=self.identity_factory(self.binding,self.package_root)
             self._identity={**self._identity,'protection_policy':protection_policy(self.config)}
+            self._resources_valid=True
+            if not self.config.require_recovery_audit:
+                self._audit_message='Recovery audit is not required by this edition; runtime integrity was verified'
+                return
             self.audit_validator(self.config.validation_report,self._identity,self.config.validation_max_age_hours)
             self._audit_valid=True
             self._audit_message='Current Electron native recovery audit passed'
         except (OSError,ValueError) as error:
             self._audit_message=str(error)[:600]
+
+    @property
+    def _audit_satisfied(self):
+        return self._audit_valid if self.config.require_recovery_audit else self._resources_valid
 
     def configure_host(self,payload):
         if self.binding or self._terminal: raise ValueError('Electron host binding cannot be replaced; restart application')
@@ -125,8 +135,8 @@ class ElectronProtection(WindowsProtection):
             self._reconcile_owner()
             with self._condition:
                 if self._terminal or not response.get('prepared'): raise RuntimeError('Native helper did not confirm host preparation')
-                self._phase='preparing' if self._audit_valid else 'awaiting_audit'
-                self._reason='control_progress_required' if self._audit_valid else 'awaiting_audit'
+                self._phase='preparing' if self._audit_satisfied else 'awaiting_audit'
+                self._reason='control_progress_required' if self._audit_satisfied else 'awaiting_audit'
             return self.binding_status()
         except BaseException:
             with self._condition:
@@ -150,7 +160,7 @@ class ElectronProtection(WindowsProtection):
         valid=bool(self.binding and self.binding.valid() and not self._terminal)
         prepared=valid and bool(self._last_status.get('prepared'))
         fresh=bool(self._confirmed_received is not None and time.monotonic()-self._confirmed_received < self.config.heartbeat_timeout_seconds)
-        ready=prepared and fresh and self._audit_valid
+        ready=prepared and fresh and self._audit_satisfied
         return {'ready':ready,'media_allowed':prepared,'error':None if ready else self._reason,
                 'binding_id':self.binding.launch_id if self.binding else None}
 
@@ -227,8 +237,8 @@ class ElectronProtection(WindowsProtection):
                 else:
                     self._phase='fault'; self._reason=str(reason or 'native_fault')
             elif message.get('prepared'):
-                self._phase='preparing' if self._audit_valid else 'awaiting_audit'
-                self._reason='ready' if self._audit_valid and message.get('control_confirmed') else ('control_progress_required' if self._audit_valid else 'awaiting_audit')
+                self._phase='preparing' if self._audit_satisfied else 'awaiting_audit'
+                self._reason='ready' if self._audit_satisfied and message.get('control_confirmed') else ('control_progress_required' if self._audit_satisfied else 'awaiting_audit')
 
     def _recovery(self,reason):
         with self._condition:
@@ -245,7 +255,7 @@ class ElectronProtection(WindowsProtection):
         # Full byte hashing happened before helper_prepare, with write/delete
         # denied until close; no package-sized synchronous IO under the lease.
         self._validate_audit()
-        if not self._audit_valid: self._reason='audit_incompatible'; raise ValueError(self._audit_message)
+        if not self._audit_satisfied: self._reason='audit_incompatible'; raise ValueError(self._audit_message)
         if not self.binding_status()['ready']: raise RuntimeError('Fresh trusted control progress is required')
         self._phase='arming'
         try:
@@ -291,7 +301,7 @@ class ElectronProtection(WindowsProtection):
     def public_state(self):
         self._reconcile_owner()
         return {'requested':self.config.enabled,'enabled':self.armed,'state':self._phase,'reason':self._reason,
-            'audit':{'valid':self._audit_valid,'message':self._audit_message,'path':str(self.config.validation_report)},
+            'audit':{'required':self.config.require_recovery_audit,'valid':self._audit_valid,'message':self._audit_message,'path':str(self.config.validation_report)},
             'challenge':self.challenge}
 
     def close(self):

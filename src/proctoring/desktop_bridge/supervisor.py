@@ -17,8 +17,20 @@ import threading
 import time
 
 from ..security.electron_binding import NativeIdentity, ancestors
+from .diagnostics import emit
 
 IDENTITY_PREFIX = 'PROCTORING_BACKEND_IDENTITY:'
+
+
+def process_identity(pid):
+    """Private in-memory identity, never emitted (command line contains secrets)."""
+    import psutil
+    process = psutil.Process(pid)
+    with process.oneshot():
+        value = (pid, process.create_time(), process.exe(), process.username(), tuple(process.cmdline()))
+    if not all(value):
+        raise ValueError('Incomplete owned process identity')
+    return value
 
 
 def announce_backend_identity():
@@ -29,12 +41,14 @@ def announce_backend_identity():
 
 
 class BackendOwner:
-    def __init__(self, pid, launcher, *, native=None, parent_chain=ancestors):
+    def __init__(self, pid, launcher, *, native=None, parent_chain=ancestors, identity_reader=process_identity):
         if type(pid) is not int or pid <= 0 or pid == os.getpid() or launcher.poll() is not None:
             raise ValueError('Invalid backend ownership announcement')
         self.native = native or NativeIdentity()
         self.handle = self.native.open_process(pid, terminate=True)
         try:
+            self.pid, self.identity_reader = pid, identity_reader
+            self.identity = identity_reader(pid)
             self.created = self.native.creation(self.handle)
             if not self.native.alive(self.handle):
                 raise ValueError('Backend already exited')
@@ -53,7 +67,16 @@ class BackendOwner:
             raise
 
     def alive(self): return self.handle is not None and self.native.alive(self.handle)
-    def terminate(self): self.native.terminate(self.handle, timeout=1.)
+    def terminate(self):
+        try:
+            if (self.identity_reader(self.pid) != self.identity or
+                    self.native.creation(self.handle) != self.created):
+                raise ValueError('Owned process identity changed')
+        except Exception as error:
+            emit('ownership_failed', error=error)
+            return False
+        self.native.terminate(self.handle, timeout=1.)
+        return True
     def close(self):
         if self.handle is not None:
             self.native.close(self.handle)
@@ -92,6 +115,7 @@ def main(argv=None):
     parser.add_argument('--preview-pipe')
     parser.add_argument('--preview-token')
     args = parser.parse_args(argv)
+    emit('supervisor_started')
     if not re.fullmatch('[a-f0-9]{32}', os.environ.get('PROCTORING_HOST_LAUNCH_ID', '')):
         parser.error('An inherited Electron launch identity is required')
     native = NativeIdentity()
@@ -108,6 +132,20 @@ def main(argv=None):
     child = subprocess.Popen(backend_command(args.config, args.preview_pipe, args.preview_token),
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env=environment, creationflags=subprocess.CREATE_NO_WINDOW, bufsize=0)
+    emit('backend_spawned')
+    try:
+        launcher_owner = BackendOwner(child.pid, child, native=native)
+    except Exception as error:
+        emit('ownership_failed', error=error)
+        # EOF requests release; never force an incompletely identified process.
+        child.stdin.close()
+        try:
+            child.wait(timeout=cleanup_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+        emit('backend_exited', code=child.poll())
+        native.close(host)
+        return 4
     host_lost = threading.Event()
     output_closed = threading.Event()
     identity_ready = threading.Event()
@@ -123,18 +161,22 @@ def main(argv=None):
                     if set(value) != {'pid', 'nonce'} or value['nonce'] != nonce:
                         raise ValueError('Backend identity nonce mismatch')
                     ownership['owner'] = BackendOwner(value['pid'], child, native=native)
+                    emit('backend_bound')
                     identity_ready.set()
                 else:
                     sys.stderr.buffer.write(line)
                     sys.stderr.buffer.flush()
-        except Exception:
+        except Exception as error:
+            emit('ownership_failed', error=error)
             ownership['error'] = True
             identity_ready.set()
             host_lost.set()
 
     raw_input = getattr(sys.stdin.buffer, 'raw', sys.stdin.buffer)
     raw_output = getattr(sys.stdout.buffer, 'raw', sys.stdout.buffer)
-    for target, arguments in [(diagnostics, ()), (_copy, (raw_input, child.stdin, host_lost)),
+    diagnostic_thread = threading.Thread(target=diagnostics, daemon=True)
+    diagnostic_thread.start()
+    for target, arguments in [(_copy, (raw_input, child.stdin, host_lost)),
                               (_copy, (child.stdout, raw_output, output_closed))]:
         threading.Thread(target=target, args=arguments, daemon=True).start()
     started = time.monotonic()
@@ -148,6 +190,7 @@ def main(argv=None):
             if not native.alive(host): host_lost.set()
             if output_closed.is_set(): host_lost.set()
             if host_lost.is_set() and deadline is None:
+                emit('supervisor_draining')
                 deadline = now + cleanup_seconds
                 def close_input():
                     try: child.stdin.close()
@@ -156,14 +199,18 @@ def main(argv=None):
             if deadline is not None and now >= deadline:
                 owner = ownership['owner']
                 if owner is not None and owner.alive(): owner.terminate()
-                # Popen retains this exact launcher HANDLE; never taskkill a PID.
-                if child.poll() is None: child.terminate()
-                child.wait(timeout=2.)
+                if child.poll() is None: launcher_owner.terminate()
+                try:
+                    child.wait(timeout=2.)
+                except subprocess.TimeoutExpired:
+                    emit('ownership_failed')
                 forced = True
+                emit('supervisor_forced')
                 break
             time.sleep(.02)
     finally:
         owner = ownership['owner']
+        diagnostic_thread.join(.2)
         if owner is not None:
             if owner.alive():
                 # Launcher loss can precede the interpreter: still enforce the
@@ -173,7 +220,14 @@ def main(argv=None):
                 if owner.alive():
                     owner.terminate()
                     forced = True
+            try:
+                emit('backend_exited', code=native.exit_code(owner.handle))
+            except OSError:
+                emit('backend_exited', code=child.poll())
             owner.close()
+        else:
+            emit('backend_exited', code=child.poll())
+        launcher_owner.close()
         native.close(host)
     return 4 if forced or ownership['error'] else (child.returncode or 0)
 

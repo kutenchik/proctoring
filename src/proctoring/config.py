@@ -4,6 +4,8 @@ import math
 from pathlib import Path
 import tomllib
 
+from .audio.evidence import AudioEvidenceConfig
+from .advanced.settings import AdvancedConfig
 from .domain import EventType
 from .browser_policy import NavigationPolicy, normalize_domains
 from .vision.settings import VisionConfig
@@ -66,6 +68,9 @@ class AppConfig:
     reporting: ReportingConfig = field(default_factory=ReportingConfig)
     source_path: Path | None = None
     connected: ConnectedConfig = field(default_factory=ConnectedConfig)
+    audio_evidence: AudioEvidenceConfig = field(default_factory=AudioEvidenceConfig)
+    advanced: AdvancedConfig = field(default_factory=AdvancedConfig)
+    event_rules: dict[str, bool] = field(default_factory=dict)
 
     @property
     def exam(self) -> ExamConfig:
@@ -90,6 +95,9 @@ class AppConfig:
             "identity": asdict(self.identity),
             "audio": asdict(self.audio),
             "reporting": asdict(self.reporting),
+            "event_rules": dict(self.event_rules),
+            "advanced": asdict(self.advanced),
+            "audio_evidence": asdict(self.audio_evidence),
             "thresholds": {key.value: value for key, value in self.thresholds.items()},
             "clearing_seconds": self.clearing_seconds,
             "recovery_seconds": self.recovery_seconds, "stale_seconds": self.stale_seconds,
@@ -138,7 +146,8 @@ def load_config(path: Path = DEFAULT_CONFIG) -> AppConfig:
         if security.get("blocking_enabled") is not False:
             raise ValueError("Legacy security.blocking_enabled must be false; opt in through protection.enabled")
         pin = security["proctor_pin"]
-        if not isinstance(pin, str) or not pin.isascii() or not pin.isdigit() or not 4 <= len(pin) <= 64:
+        managed_pin = pin == '' and data.get('connected', {}).get('enabled') is True
+        if not managed_pin and (not isinstance(pin, str) or not pin.isascii() or not pin.isdigit() or not 4 <= len(pin) <= 64):
             raise ValueError("proctor_pin must be a quoted string of 4–64 digits")
         snapshots = storage["snapshots_enabled"]
         if not isinstance(snapshots, bool):
@@ -273,6 +282,8 @@ def _load_protection(values: dict, base: Path) -> ProtectionConfig:
     data = {**defaults, **values}
     if type(data["enabled"]) is not bool:
         raise ValueError("protection.enabled must be true or false")
+    if type(data["require_recovery_audit"]) is not bool:
+        raise ValueError("protection.require_recovery_audit must be true or false")
     for key in ("heartbeat_timeout_seconds", "startup_timeout_seconds", "validation_max_age_hours"):
         data[key] = _positive(data, key)
     if not .5 <= data["heartbeat_timeout_seconds"] <= 30:

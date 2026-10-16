@@ -5,6 +5,7 @@ import base64
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from io import BytesIO
+from proctoring.advanced.settings import consent_version
 import json
 import math
 import secrets
@@ -19,10 +20,10 @@ from .stream_trace import StreamTrace
 LIMITS = {"max_fps": 5, "max_frame_bytes": 262144, "max_message_bytes": 393216,
           "max_width": 1920, "max_height": 1920, "bytes_per_second": 1572864,
           "frame_queue": 1, "stale_frame_seconds": 3}
-KINDS = {"warning", "pause", "resume", "end", "add_time", "monitoring_recovery", "display_recovery"}
+KINDS = {"monitoring_policy", "warning", "pause", "resume", "end", "add_time", "monitoring_recovery", "display_recovery"}
 MAX_STUDENTS, MAX_TEACHERS, MAX_VIEWERS = 256, 128, 128
 RESULT_KEYS = {"state", "pause_reasons", "elapsed_seconds", "remaining_seconds", "duration_seconds",
-               "old_duration_seconds", "new_duration_seconds", "delta_seconds", "code"}
+               "old_duration_seconds", "new_duration_seconds", "delta_seconds", "code", "policy_revision", "policy_hash"}
 
 
 def bounded_json(value, limit):
@@ -167,20 +168,22 @@ class LiveService:
                 raise Problem("login_required", "Live teacher session changed", 401)
 
     def consent(self, peer, data):
-        if data.get("version") != 3 or type(data.get("accepted")) is not bool:
+        if type(data.get("accepted")) is not bool:
             raise Problem("invalid_consent", "Explicit screen-viewing consent version 3 (monitor and live event snapshots) is required")
         with self.database.connect(write=True) as connection:
             attempt, state = self.sync._owned(connection, peer.credential, peer.device_secret)
+            expected = consent_version(json.loads(attempt["policy_snapshot"]))
+            if data.get("version") != expected: raise Problem("invalid_consent", "Current policy consent version is required")
             prior = connection.execute("SELECT * FROM live_attempts WHERE attempt_id=? AND session_id=?", (peer.identity, peer.session_id)).fetchone()
             accepted = self.clock() if data["accepted"] else None
             if attempt["started_at"] is not None or state["start_key"]:
-                if not data["accepted"] or not prior or prior["consent_version"] != 3 or prior["consent_accepted_at"] is None:
+                if not data["accepted"] or not prior or prior["consent_version"] != expected or prior["consent_accepted_at"] is None:
                     raise Problem("consent_locked", "Consent cannot change after start authorization", 409)
                 accepted = prior["consent_accepted_at"]
             else:
-                connection.execute("UPDATE live_attempts SET consent_version=?,consent_accepted_at=? WHERE attempt_id=? AND session_id=?", (3 if data["accepted"] else None, accepted, peer.identity, peer.session_id))
-                self.service.audit(connection, None, "screen_viewing_consent", peer.identity, self.clock(), details={"version": 3, "accepted": data["accepted"], "session_id": peer.session_id})
-        peer.put({"type": "consent", "accepted": data["accepted"], "version": 3,
+                connection.execute("UPDATE live_attempts SET consent_version=?,consent_accepted_at=? WHERE attempt_id=? AND session_id=?", (expected if data["accepted"] else None, accepted, peer.identity, peer.session_id))
+                self.service.audit(connection, None, "screen_viewing_consent", peer.identity, self.clock(), details={"version": expected, "accepted": data["accepted"], "session_id": peer.session_id})
+        peer.put({"type": "consent", "accepted": data["accepted"], "version": expected,
                   "session_id": peer.session_id, "recorded_at": iso(accepted)})
 
     @staticmethod
@@ -280,11 +283,14 @@ class LiveService:
                 old = durable.get(event["event_id"])
                 if old is None or event.get("sequence",-1) >= old.get("sequence",-1): durable[event["event_id"]] = event
             files = {f["event_id"]:f for f in connection.execute("SELECT e.event_id,f.item_id,f.complete FROM event_snapshots e JOIN sync_files f ON f.attempt_id=e.attempt_id AND f.item_id=e.item_id WHERE e.attempt_id=?", (row["id"],))}
+            audio_files = [dict(f) for f in connection.execute("SELECT item_id AS id,kind,relative_path,complete FROM sync_files WHERE attempt_id=? AND kind='audio'", (row['id'],))]
             enabled = json.loads(row["policy_snapshot"])["save_snapshots"]
             for event in durable.values():
                 raw = raw_by_id.get(event["event_id"], {})
+                from .review import audio_projection
+                event["audio"] = audio_projection(raw, audio_files)
                 file = files.get(event["event_id"])
-                status = "disabled" if not enabled else "available" if file and file["complete"] else "unavailable" if raw.get("snapshot_status") == "unavailable" else "pending" if raw.get("snapshot_path") or raw.get("snapshot_status") in ("pending","ready") or event["category"] == "behavioral" else "not_applicable"
+                status = "disabled" if not enabled or raw.get("snapshot_status")=="disabled" else "available" if file and file["complete"] else "unavailable" if raw.get("snapshot_status") == "unavailable" else "pending" if raw.get("snapshot_path") or raw.get("snapshot_status") in ("pending","ready") or event["category"] == "behavioral" else "not_applicable"
                 event["snapshot"] = {"status":status,"item_id":file["item_id"] if status == "available" else None,
                     "reason":raw.get("snapshot_reason") if raw.get("snapshot_reason") in ("capture_unavailable","production_failed") else None}
             # Status records advance sequence, not the canonical event's position.
@@ -365,6 +371,13 @@ class LiveService:
     def payload(kind, payload):
         if not isinstance(payload, dict) or kind not in KINDS:
             raise Problem("invalid_command", "Unsupported remote command")
+        if kind == 'monitoring_policy':
+            from proctoring.exam_policy import validate_values
+            if set(payload)!={'reason','patch','base_revision','revision'} or type(payload['base_revision']) is not int or type(payload['revision']) is not int or payload['base_revision']<0 or payload['revision']!=payload['base_revision']+1:
+                raise Problem('invalid_monitoring_policy','Invalid policy revision')
+            try:validate_values(payload['patch'],complete=False)
+            except ValueError as e:raise Problem('invalid_monitoring_policy',str(e)) from None
+            return {**payload,'reason':text_field(payload,'reason',1000)}
         keys = {"warning": {"text"}, "pause": {"reason"}, "resume": {"reason"}, "end": {"reason", "confirm"},
                 "add_time": {"seconds", "reason"}, "monitoring_recovery": {"outage_id", "reason"}, "display_recovery": {"incident_id", "reason"}}
         if set(payload) != keys[kind]:
@@ -404,8 +417,24 @@ class LiveService:
                 display = peer.status["display"]
                 if display["count"] != 1 or not display["ready"] or not display["calibration_ready"] or not display["approval_required"] or display["incident_id"] != payload["incident_id"]:
                     raise Problem("recovery_unavailable", "Single-display revalidation/calibration and a pending incident are required", 409)
+            policy_state = None
+            if kind == 'monitoring_policy':
+                from .configuration import effective
+                from proctoring.exam_policy import live_patch
+                policy_state=effective(connection,attempt)
+                if policy_state['legacy'] or policy_state['revision']!=payload['base_revision']:
+                    raise Problem('stale_policy','Legacy or stale policy revision',409)
+                if any(h['status'] not in ('applied','rejected') for h in policy_state['history']):
+                    raise Problem('policy_pending','Resolve pending or unconfirmed policy first',409)
+                if not peer.status.get('screen_consent') or peer.status.get('state') not in ('running','paused'):
+                    raise Problem('consent_required','Active consented attempt required',409)
+                try:new_policy=live_patch(policy_state['policy'],payload['patch'])
+                except ValueError as e:raise Problem('invalid_monitoring_policy',str(e)) from None
             cid, now = uuid4().hex, self.clock()
             connection.execute("INSERT INTO live_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)", (cid, request_id, owner, attempt["exam_id"], attempt_id, peer.session_id, peer.connection_id, kind, encoded(payload), now, now+10, "sent"))
+            if policy_state is not None:
+                connection.execute('INSERT INTO monitoring_policy_changes VALUES (?,?,?,?,?,?,?,?)',
+                    (cid,attempt_id,payload['revision'],encoded(policy_state['policy']),encoded(new_policy),owner,payload['reason'],now))
             row = connection.execute("SELECT * FROM live_commands WHERE id=?", (cid,)).fetchone()
             document = self.command_document(row)
             connection.execute("INSERT INTO live_command_events(command_id,phase,payload,created_at) VALUES (?,?,?,?)", (cid, "sent", "{}", now))
@@ -433,6 +462,10 @@ class LiveService:
                 delta = json.loads(row["payload"])["seconds"]
                 if any(key not in result for key in ("old_duration_seconds", "new_duration_seconds", "delta_seconds")) or result["delta_seconds"] != delta or result["new_duration_seconds"] - result["old_duration_seconds"] != delta:
                     raise Problem("invalid_command_ack", "Applied time delta must match the issued command")
+            if phase == 'applied' and row['command_type']=='monitoring_policy':
+                change=connection.execute('SELECT * FROM monitoring_policy_changes WHERE command_id=?',(cid,)).fetchone()
+                if type(result.get('policy_revision')) is not int or result.get('policy_revision')!=change['revision'] or result.get('policy_hash')!=checksum(json.loads(change['new_policy'])):
+                    raise Problem('invalid_command_ack','Applied policy identity differs from request')
             status = "delivered" if phase == "received" else phase
             if row["status"] in ("applied", "rejected"):
                 if row["status"] != status or json.loads(row["result"] or "{}") != result:
@@ -477,7 +510,7 @@ class LiveService:
             consent = connection.execute("SELECT * FROM live_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
             if not self.active(peer) or attempt["finished_at"] is not None:
                 raise Problem("student_offline", "A fresh active attempt is required", 409)
-            if not consent or consent["consent_version"] != 3 or consent["consent_accepted_at"] is None or consent["session_id"] != peer.session_id or not peer.status["screen_consent"]:
+            if not consent or consent["consent_version"] != consent_version(json.loads(attempt["policy_snapshot"])) or consent["consent_accepted_at"] is None or consent["session_id"] != peer.session_id or not peer.status["screen_consent"]:
                 raise Problem("consent_required", "Current session has no screen-viewing consent", 409)
             for old in list(self.viewers.values()):
                 if old.teacher_id == owner:

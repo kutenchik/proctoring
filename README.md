@@ -1,5 +1,39 @@
 # Local Proctoring
 
+## Windows student EXEs — version 0.7.1
+
+Download both editions from [one GitHub release](https://github.com/kutenchik/proctoring/releases/tag/v0.7.1). Each is a standalone Windows x64 EXE: double-click it; students do not need Python, Node, models or console commands.
+
+| Download | Teacher exam setting | Keyboard behavior | Recovery audit |
+| --- | --- | --- | --- |
+| [Protected EXE](https://github.com/kutenchik/proctoring/releases/download/v0.7.1/LocalProctoring-Student-Protected-0.7.1.exe) | Protected Mode | Fullscreen and shortcut restrictions during the exam; teacher PIN pause/resume; emergency Ctrl+Shift+Alt+Q | Not required in this explicit no-audit edition |
+| [Unprotected EXE](https://github.com/kutenchik/proctoring/releases/download/v0.7.1/LocalProctoring-Student-Unprotected-0.7.1.exe) | Unprotected Mode | No keyboard suppression or foreground containment; Alt+Tab and Alt+F4 remain available | Not required |
+
+Both editions share the current student interface, server verification and exam-code admission, teacher monitoring configuration, consent v5, camera/microphone checks, calibration, event snapshots, optional audio evidence clips, teacher screen viewing and commands, normal submission and PDF synchronization. Each rejects an exam whose protection setting does not match its edition.
+
+### Student steps
+
+1. Keep the teacher server and website running. Double-click the appropriate EXE.
+2. Enter the teacher server address and click **Verify server**. For a server on the same computer, use `http://127.0.0.1:8000`. Remote servers require trusted HTTPS.
+3. Enter the teacher's exam code and your student details, then join.
+4. Accept the required consent. Wait for teacher-server acknowledgement, then test devices, capture the reference photo and complete calibration/readiness.
+5. Start only when ready. Protected restrictions begin at exam Start, not at Join. The teacher manages the private PIN under **Security → Protection PIN**. Keep **Ctrl+Shift+Alt+Q** available for emergency release in the Protected edition.
+6. Submit normally and wait for synchronization to complete before closing. Retain any unsynchronized local evidence.
+
+Detailed instructions: [Protected edition](packaging/STUDENT-NOAUDIT.md), [Unprotected edition](packaging/STUDENT-UNPROTECTED.md), [build and verification notes](docs/STUDENT_EDITIONS_0_7_1.md).
+
+### Teacher setup and limitations
+
+Use the server and teacher website from this release's source. Follow [teacher server setup](server/README.md) and [teacher website setup](teacher-web/README.md). Create an exam with the matching protection mode and supported monitoring settings. Audio clips require both teacher policy and student consent.
+
+Optional DeepFace identity/liveness is not bundled in these EXEs; exams requiring it are rejected. The EXEs are unsigned. This release has automated tests and frozen-package integrity checks, but no new real-device exam or native protection test was run. Removing the audit prerequisite does not mean that a native audit passed. Resource integrity, ownership checks, guardian/watchdog release and the emergency shortcut remain in the Protected edition.
+
+The editions use separate persistent profiles under `%LOCALAPPDATA%\LocalProctoring\Editions\ProtectedNoAudit` and `...\Unprotected`. Existing attempts are preserved. Finish/synchronize attempts before updating; an unfinished attempt from a different build blocks admission rather than being silently discarded.
+
+## Earlier development history
+
+The material below records previous source/legacy releases and stage-specific checks. Historical audit-required startup instructions do not describe the two v0.7.1 downloads above. Original records remain in `docs/`.
+
 [English](README.md) | [Р СѓСЃСЃРєРёР№](README.ru.md)
 
 A local Windows proctoring application with a Python monitoring and authoritative
@@ -10,6 +44,26 @@ through authenticated HTTPS/WSS. The legacy PySide6 student interface remains av
 This is a development checkpoint, **not a production-readiness claim**. Implemented
 features, automated checks and physical verification are separate evidence levels.
 Stage 4B development is temporarily paused; it is **not fully accepted**.
+
+For the current same-computer workflow, isolated startup commands and actual
+verification results, see [Localhost acceptance](docs/LOCALHOST_ACCEPTANCE.md).
+Internet deployment is deferred; localhost results do not accept Stage 4B.
+Stage 4C [protected localhost validation](docs/LOCALHOST_PROTECTED_ACCEPTANCE.md)
+passed its then-current-build recovery audit and native restriction checks, but the human
+workflow failed at Test camera before Start and left Electron processes after
+window close. Protected localhost end-to-end acceptance has **not passed**. Stage 4D capacity/load testing has not been performed;
+30 simultaneous students are not validated. Current portable packaging status is documented below; packaged Protected Mode remains unvalidated.
+
+[Camera/shutdown diagnosis](docs/LOCALHOST_PROTECTED_CAMERA_SHUTDOWN_FIX.md) adds bounded
+local diagnostics and fixes reproduced cleanup failures. Focused automated checks pass;
+the original physical failure remains unexplained. These source changes invalidate the
+previous native audit. One approved standalone camera-only diagnostic succeeded and
+normal close left no recorded owned processes running; the original connected protected
+failure was not reproduced. Protected acceptance has not resumed.
+
+The subsequent fresh recovery audit stopped at 3/21 checks after a progress-output
+EPIPE error. The [audit output lifecycle fix](docs/LOCALHOST_AUDIT_EPIPE_FIX.md) passes
+focused automated tests and a source build; a new native audit awaits operator approval.
 
 ## Current capabilities
 
@@ -1136,3 +1190,59 @@ Older investigation guides record the behavior/results of their named stage and
 may describe superseded settings. Use this README, current configuration, and
 the current implementation together; historical numerical results must not be
 presented as new independent human validation.
+
+
+## Teacher configuration profiles (localhost source)
+
+The teacher dashboard now renders 22 explicitly approved monitoring fields from a
+shared Python catalog in English, Russian and Kazakh. Teachers can save private
+profiles and duplicate/rename them on the separate **Configurations** page. Its
+dedicated editor provides Basic/Advanced tabs; **Create Exam** selects a saved
+configuration and shows a compact read-only summary. Exam creation freezes a complete validated policy; admission
+applies it to the Python engine. Disabling second-person warnings preserves shared
+phone/person processing. Older exams keep their existing behavior.
+
+Selected event rules/timings and disabling microphone monitoring or future event
+snapshots support reasoned, versioned per-attempt live commands. The dashboard
+shows the acknowledged effective revision; pending or unconfirmed commands are
+not claimed as applied. Host safety, consent and protection guarantees remain
+outside the editable policy.
+
+See [Teacher configuration and profiles](docs/TEACHER_CONFIG_PROFILES.md) for the
+complete field inventory, APIs, limits, targeted tests and deferred manual checks.
+**These source/build changes invalidate previous native protection audits.** A
+fresh matching audit and explicit approval are required before future physical
+protected validation. No native protection test or physical capture was run for
+this feature; packaging, Internet work and Stage 4D remain outside this task.
+
+### Optional remote-access, liveness and face matching
+
+The Configurations catalog now supports three independent, disabled-by-default
+checks: narrow Windows remote-access observations, passive MiniFASNet liveness,
+and local Facenet512 face consistency. New features require consent v4 and
+readiness; existing policies migrate with these checks off. Face analysis uses
+a separate, deliberately prepared CPU environment and verified offline weights.
+Embeddings remain in worker memory, and advanced identity attempts require a
+replacement attempt after a process restart that loses the reference.
+
+See [implementation, setup, limits and validation](docs/REMOTE_ACCESS_LIVENESS_IDENTITY.md)
+and [DeepFace feasibility research](docs/DEEPFACE_FEASIBILITY.md). Synthetic tests
+do not establish real-face accuracy or replay resistance. No real capture or
+native protection validation was performed; prior protection audits are invalid
+for the changed build.
+
+
+### Optional audio evidence and teacher playback
+
+Configurations now includes **Save audio evidence**, off by default, with bounded
+pre/post-event durations. With explicit consent v5, the existing microphone
+stream saves short event-associated mono WAV clips for authenticated teacher
+playback during and after an exam. Playback offers 1–4× amplification and reset;
+original evidence remains unchanged. Schema 1/2 policies migrate to schema 3
+with recording disabled. Missing required audio prevents a complete receipt and
+premature local deletion; existing 30-day server retention applies.
+
+See [Teacher audio evidence](docs/TEACHER_AUDIO_EVIDENCE.md) for limits, privacy,
+recovery, focused test results and the separately approved real-microphone plan.
+No real devices or native protection tests were launched for this feature.
+Previous native protection audits do not authorize this changed source/build.

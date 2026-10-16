@@ -208,3 +208,28 @@ progress::-webkit-progress-bar { background: var(--border); border-radius: 8px; 
 /* Reserve warning space; ongoing observations do not insert/remove layout rows. */
 .review-warning-slot { min-height: 108px; }
 .review-warning-slot .review-warning { margin-bottom: 0; animation: none; transition: none; }
+
+/* Live monitoring has one column even when the legacy fixture uses a grid.
+   Reserve update regions so incoming observations cannot move the scroll anchor. */
+.live-exam-grid .monitor-panel {
+  display: block;
+  scrollbar-gutter: stable;
+  overflow-anchor: none;
+  overscroll-behavior-y: contain;
+}
+.live-exam-grid .camera-preview { min-height: 0; max-height: none; aspect-ratio: 16 / 9; }
+.live-exam-grid .module-status > span { min-height: 2lh; }
+.live-exam-grid .review-warning-slot { height: 156px; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.live-exam-grid .review-warning { margin: 0; overflow-wrap: anywhere; }
+.live-exam-grid .review-warning > div { min-width: 0; }
+.live-exam-grid .recent-events { height: 240px; overflow-y: auto; scrollbar-gutter: stable; overflow-anchor: none; }
+.live-exam-grid .event-item > div { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 780px) {
+  .live-exam-grid { grid-template-columns: minmax(0,1fr) 240px; }
+  .live-exam-grid .question-meta, .live-exam-grid .answer { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .live-exam-grid { grid-template-columns: minmax(0,1fr); }
+  .live-exam-grid .monitor-panel { position: relative; top: auto; max-height: none; overflow: visible; }
+  .live-exam-grid .exam-preview-dock { position: relative; }
+}

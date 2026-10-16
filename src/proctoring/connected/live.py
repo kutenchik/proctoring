@@ -11,6 +11,7 @@ import queue
 import threading
 import time
 
+from ..advanced.settings import consent_version
 from .client import _time, server_origin
 
 
@@ -85,7 +86,15 @@ class LiveWorker:
         return data
 
     def _run(self):
-        from websockets.sync.client import connect
+        try:
+            from websockets.sync.client import connect
+        except ImportError:
+            # Surface a broken distribution instead of dying outside the
+            # connection loop and leaving consent indefinitely pending.
+            self.error = 'live_transport_unavailable'
+            self.connection = 'offline'
+            self.connection_id = None
+            return
         connect = self.connector or connect
         delay=1.
         while not self.stop_event.is_set():
@@ -113,7 +122,7 @@ class LiveWorker:
                         with self.lock:
                             latest=self.latest;consent=self.accepted_consent;revision=self.consent_revision
                         if consent_revision!=revision:
-                            ws.send(json.dumps({'type':'consent','version':3,'accepted':consent}))
+                            ws.send(json.dumps({'type':'consent','version':consent_version(self.client.admission['exam']),'accepted':consent}))
                             consent_revision=revision
                         if latest and now-last_status>=1 and 0<=now-latest[0]<2:
                             sequence+=1

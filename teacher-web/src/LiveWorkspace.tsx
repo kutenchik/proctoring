@@ -1,3 +1,5 @@
+import { AudioEvidencePlayer } from './AudioEvidencePlayer';
+import {AttemptPolicy} from './Configuration';
 import { EventSnapshot } from './EventSnapshot';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, Monitor, Maximize2, Square, Radio, Send, RefreshCw } from 'lucide-react';
@@ -12,7 +14,7 @@ import { useLive } from './use-live';
 import { screenCode } from '../../shared/screen-diagnostic';
 import './live.css';
 
-const commandLabels:Record<CommandType,string>={warning:'liveWarning',pause:'livePause',resume:'liveResume',end:'liveEnd',add_time:'liveAddTime',monitoring_recovery:'liveMonitoringRecovery',display_recovery:'liveDisplayRecovery'};
+const commandLabels:Record<CommandType,string>={monitoring_policy:'monitoringPolicy',warning:'liveWarning',pause:'livePause',resume:'liveResume',end:'liveEnd',add_time:'liveAddTime',monitoring_recovery:'liveMonitoringRecovery',display_recovery:'liveDisplayRecovery'};
 const resultLabels:Record<LiveCommand['status'],string>={sent:'liveSent',delivered:'liveDelivered',applied:'liveApplied',rejected:'liveRejected',not_delivered:'liveNotDelivered',execution_unconfirmed:'liveUnconfirmed'};
 const stateLabels={preparation:'livePreparation',running:'liveRunning',paused:'livePaused',ended:'liveEnded'};
 const pauseLabels:Record<string,string>={teacher:'liveTeacherPause',teacher_pause:'liveTeacherPause',monitoring:'liveMonitoringPause',monitoring_unavailable:'liveMonitoringPause',recovery_pin:'liveRecoveryPause',monitoring_recovery:'liveRecoveryPause',display:'liveDisplayPause',display_configuration:'liveDisplayPause',proctor:'liveProctorPause'};
@@ -53,7 +55,7 @@ function Actions({student,connected,remember,onError}:{student:LiveStudent;conne
     catch(error){onError(error);}finally{setBusy(false);}
   }
   return <section className="panel live-actions"><h2>{t('liveCommands')}</h2><p className="small muted">{t('liveCommandHint')}</p><form onSubmit={submit}>
-    <Field label={t('liveCommands')}><select value={type} onChange={e=>{setType(e.target.value as CommandType);setConfirmed(false);}}>{(Object.keys(commandLabels) as CommandType[]).map(value=><option key={value} value={value} disabled={!commandAllowed(student,value,connected)}>{t(commandLabels[value])}</option>)}</select></Field>
+    <Field label={t('liveCommands')}><select value={type} onChange={e=>{setType(e.target.value as CommandType);setConfirmed(false);}}>{(Object.keys(commandLabels) as CommandType[]).filter(v=>v!=='monitoring_policy').map(value=><option key={value} value={value} disabled={!commandAllowed(student,value,connected)}>{t(commandLabels[value])}</option>)}</select></Field>
     <Field label={t(type==='warning'?'liveMessage':'reason')}><textarea value={text} onChange={e=>setText(e.target.value)} required maxLength={type==='warning'?400:1000} rows={2}/></Field>
     {type==='add_time'&&<Field label={t('liveSeconds')}><input type="number" min={1} max={3600} step={1} value={seconds} onChange={e=>setSeconds(Number(e.target.value))} required/></Field>}
     {type==='end'&&<label className="check-field"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} required/>{t('liveConfirmEnd')}</label>}
@@ -106,6 +108,6 @@ export function LiveWorkspace({id,csrf}:{id:string;csrf:string}) {
       <Actions key={selected} student={student} connected={live.connection==='online'} remember={live.remember} onError={setError}/>
       <RecordedControls key={`recorded-${selected}`} student={student}/>
       <section className="panel"><h2>{t('liveCommandHistory')}</h2>{!commands.length?<p className="muted">{t('liveNoCommands')}</p>:<ul className="live-history">{commands.map(command=><li key={command.command_id}><div><strong>{t(commandLabels[command.command_type])}</strong><span className={`badge command-${command.status}`}>{t(resultLabels[command.status])}</span></div><p>{String(command.payload.text??command.payload.reason??'')}</p><small className="muted">{displayTime(command.created_at,language)}{command.command_type==='add_time'?` · +${String(command.payload.seconds)} s`:''}</small><code className="technical small">{command.command_id}</code></li>)}</ul>}</section>
-      <section className="panel"><h2>{t('liveFeed')}</h2><p className="small muted">{t('liveFeedHint')}</p>{(['behavioral','technical'] as const).map(category=><div key={category} className="live-event-group"><h3>{t(category==='technical'?'technical':'behavior')}</h3>{!student.events.filter(e=>e.category===category).length?<p className="muted">{t('liveNoEvents')}</p>:<ol>{student.events.filter(e=>e.category===category).slice().reverse().map(event=><li key={`${selected}:${event.event_id}`}><strong>{eventLabel(event.event_type,t)}</strong><span>{displayTime(event.timestamp,language)}</span>{event.duration_seconds!=null&&<span>{event.duration_seconds.toFixed(1)} s</span>}<a href={`#/attempt/${encodeURIComponent(selected)}`}>{t('openAttempt')}</a><EventSnapshot attemptId={selected} snapshot={event.snapshot}/></li>)}</ol>}</div>)}</section>
+      <AttemptPolicy key={`policy:${selected}`} attemptId={selected} live={student.status?.state==='running'||student.status?.state==='paused'}/><section className="panel"><h2>{t('liveFeed')}</h2><p className="small muted">{t('liveFeedHint')}</p>{(['behavioral','technical'] as const).map(category=><div key={category} className="live-event-group"><h3>{t(category==='technical'?'technical':'behavior')}</h3>{!student.events.filter(e=>e.category===category).length?<p className="muted">{t('liveNoEvents')}</p>:<ol>{student.events.filter(e=>e.category===category).slice().reverse().map(event=><li key={`${selected}:${event.event_id}`}><strong>{eventLabel(event.event_type,t)}</strong><span>{displayTime(event.timestamp,language)}</span>{event.duration_seconds!=null&&<span>{event.duration_seconds.toFixed(1)} s</span>}<a href={`#/attempt/${encodeURIComponent(selected)}`}>{t('openAttempt')}</a><EventSnapshot attemptId={selected} snapshot={event.snapshot}/><AudioEvidencePlayer attemptId={selected} audio={event.audio}/></li>)}</ol>}</div>)}</section>
     </>}</div></div></div>;
 }

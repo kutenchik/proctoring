@@ -36,7 +36,7 @@ Use a separate environment; do not install these dependencies into the desktop
 environment or change its lockfile:
 
 ```powershell
-Set-Location 'C:\Users\kuten\Desktop\case3_proctoring'
+Set-Location 'C:\Users\kuten\Desktop\proctoring-main'
 py -3.11 -m venv .venv-server
 .\.venv-server\Scripts\python.exe -m pip install -r server\requirements.lock.txt
 . .\server\environment.example.ps1

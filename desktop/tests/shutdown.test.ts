@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { finishShutdown } from '../electron/shutdown';
 
+test('failed capture cleanup cannot strand healthy or disconnected main shutdown', async () => {
+  for (const connected of [true, false]) {
+    const calls: string[] = [];
+    await finishShutdown({
+      preparation: [() => { calls.push('capture'); throw Error('disposed capture'); }, () => { calls.push('shortcuts'); }],
+      closePresentation: () => { calls.push('presentation'); },
+      endSession: () => { calls.push(connected ? 'release' : 'already-disconnected'); },
+      closeBackend: () => { calls.push('backend'); },
+      quit: () => { calls.push('quit'); }, reportErrors: () => { calls.push('reported'); },
+    } as Parameters<typeof finishShutdown>[0]);
+    assert.deepEqual(calls, ['capture', 'shortcuts', 'presentation', connected ? 'release' : 'already-disconnected', 'backend', 'quit', 'reported']);
+  }
+});
+
 test('terminal cleanup runs every finalizer and reports failures without rejecting', async () => {
   const order = ['presentation', 'emergency', 'backend', 'quit'];
   for (const failing of [[], ...order.map(name => [name]), order]) {

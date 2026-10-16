@@ -208,7 +208,7 @@ def test_migrations_idempotent(service):
     service.database.migrate()
     service.database.migrate()
     with service.database.connect() as connection:
-        assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations")] == [1]
+        assert [row[0] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")] == [1, 2, 3, 4, 5]
 
 
 def test_shuffle_applied_once_preserves_correct_ids(service, exam, admission_data, document, monkeypatch):

@@ -289,3 +289,90 @@ def test_real_loopback_http_notifies_authenticated_teacher_websocket(active, net
             assert reply.status_code==200,reply.text
             assert receive(ws,'student')['student']['events'][0]['snapshot']['status']=='available'
             assert teacher.get('/api/v1/attempts/'+row['attempt_id']+'/evidence/'+item).content==raw
+
+
+def test_production_http_multichunk_restart_and_final_receipt(active, app, settings, clock, owner):
+    """Same URL/database, real Requests transport, lost replies, no devices."""
+    import random
+    import time
+    from proctoring.connected.client import ConnectedClient
+    from proctoring.connected.settings import ConnectedConfig
+    from proctoring.connected.sync import digest, verify_receipt
+    from proctoring_server.app import create_app
+    from test_live_api import running_network
+    a = active
+    encoded = BytesIO()
+    Image.frombytes('RGB', (900, 900), random.Random(42).randbytes(900*900*3)).save(encoded, 'JPEG', quality=90)
+    raw = encoded.getvalue()
+    assert len(raw) > 2*262144
+    image_path = publish(a, raw)
+    # Large legitimate JSONL, rather than a single oversized record.
+    with (a['root']/'events.jsonl').open('a') as handle:
+        for index in range(1800):
+            handle.write(json.dumps({**a['event'], 'record_kind':'snapshot_result', 'duration_seconds':index+1})+'\n')
+    assert (a['root']/'events.jsonl').stat().st_size > 262144
+    client = ConnectedClient(ConnectedConfig(allow_loopback_http=True, timeout_seconds=2),
+                             remember_path=a['root']/'unused.json')
+    client.device = {'device_secret':a['row']['device_secret']}
+    dropped = set(); chunks = []
+    def transport(*args):
+        result = client.transport(*args)
+        endpoint, body = args[2], args[3]
+        if '/chunks' in endpoint:
+            chunks.append((endpoint, body['offset']))
+            if endpoint not in dropped:
+                dropped.add(endpoint)
+                raise ConnectedError('connection_failed')  # committed reply lost
+        return result
+    with running_network(app) as (url, _, _):
+        port = int(url.rsplit(':', 1)[1])
+        a['journal'].update(a['key'], server=url)
+        a['worker'] = SyncWorker(a['journal'], a['root'].parent, transport)
+        for _ in range(30):
+            try: tick(a)
+            except ConnectedError: break
+        assert dropped and image_path.exists()
+    # Actual listener is down; same local evidence must survive.
+    with pytest.raises(ConnectedError): tick(a)
+    assert image_path.exists() and not a['journal'].get(a['key']).get('receipt')
+    a['journal'] = DurableJournal(a['journal'].path, vault=Vault())
+    a['worker'] = SyncWorker(a['journal'], a['root'].parent, transport)
+    fresh = create_app(settings, clock=clock)
+    started = time.monotonic()
+    with running_network(fresh, port):
+        for _ in range(40):
+            tick(a)
+            row = a['journal'].get(a['key'])
+            if row.get('early_snapshots', {}).get('event-1', {}).get('complete'): break
+        item = row['early_snapshots']['event-1']
+        assert item['complete'] and not row.get('receipt') and not row.get('cleanup')
+        stored = fresh.state.sync.evidence_file(owner, row['attempt_id'], item['item_id'])[0]
+        assert stored.read_bytes() == raw and sha256(stored.read_bytes()).hexdigest() == item['sha256']
+        Image.open(stored).load()
+        print(f' localhost recovered snapshot available in {time.monotonic()-started:.3f}s; JPEG {len(raw)} bytes')
+        root = a['root']
+        summary = {'session_id':row['session_id'],'connected_attempt':{'attempt_id':row['attempt_id']},
+            'started_at':iso(clock()),'ended_at':iso(clock()+20),'end_reason':'completed','elapsed_seconds':20,
+            'remaining_seconds':580,'score':0,'total_questions':2,'events':[a['event']],'snapshot_errors':[],'storage_error':None}
+        (root/'summary.json').write_text(json.dumps(summary))
+        (root/'answers.json').write_text(json.dumps({'session_id':row['session_id'],'attempt_id':row['attempt_id'],'answers':{}}))
+        pdf = Canvas(str(root/'report.pdf')); pdf.drawString(20, 40, row['attempt_id']); pdf.save()
+        original = (root/'report.pdf').read_bytes()
+        a['journal'].update(a['key'], phase='ended_locally', media_released=True)
+        for _ in range(80):
+            try: tick(a)
+            except ConnectedError: pass
+            row = a['journal'].get(a['key'])
+            if row.get('cleanup'): break
+        assert row.get('cleanup'), row.get('error')
+        assert verify_receipt(row, row['receipt'])
+        receipt = fresh.state.sync.status(a['row']['credential'],a['row']['device_secret'])['receipt']
+        assert receipt == row['receipt'] and receipt['manifest_sha256'] == digest(row['manifest'])
+        for entry in row['manifest']['items']:
+            if entry['status'] != 'present': continue
+            data = fresh.state.sync.evidence_file(owner,row['attempt_id'],entry['id'])[0].read_bytes()
+            assert len(data) == entry['size'] and sha256(data).hexdigest() == entry['sha256']
+            assert not (root/entry['relative_path']).exists()
+        assert fresh.state.sync.evidence_file(owner,row['attempt_id'],'original_pdf')[0].read_bytes() == original
+        assert not any('/files/'+item['item_id']+'/' in endpoint for endpoint, _ in chunks)
+        assert any('/files/events/' in endpoint and offset >= 262144 for endpoint, offset in chunks)

@@ -41,6 +41,8 @@ def source_fingerprint(root: Path | None = None) -> str:
     root = ROOT if root is None else root
     root = Path(root)
     paths = list((root / "src/proctoring/security").glob("*.py"))
+    paths += list((root / "src/proctoring/advanced").glob("*.py"))
+    paths += list((root / "src/proctoring/audio").glob("*.py"))
     paths += [root / name for name in (
         "src/proctoring/controller.py", "src/proctoring/ui/window.py",
         "src/proctoring/config.py", "src/proctoring/__main__.py",

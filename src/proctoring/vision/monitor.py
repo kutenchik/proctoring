@@ -477,6 +477,9 @@ class RealMonitor:
                             break
                         optional_identity, optional_accessory = self._optional_observations(
                             captured.image, cached_face, captured.timestamp)
+                        sink = getattr(self, 'advanced_sink', None)
+                        if sink is not None:
+                            sink(captured.image, cached_face, captured.timestamp)
                         last_face_sequence = captured.sequence
                         next_face_at = self.clock.monotonic() + 1 / self.config.face_fps
                         with self._lock:

@@ -6,6 +6,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class ProtectionConfig:
     enabled: bool = False
+    require_recovery_audit: bool = True
     heartbeat_timeout_seconds: float = 5.0
     startup_timeout_seconds: float = 5.0
     foreground_poll_ms: int = 100
